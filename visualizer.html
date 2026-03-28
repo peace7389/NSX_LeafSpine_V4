@@ -1,0 +1,2669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NSX Leaf-Spine Simulator Trace Visualizer</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f0f1a;
+    --surface: #1a1a2e;
+    --surface2: #16213e;
+    --surface3: #0d3b66;
+    --accent: #e94560;
+    --text: #e0e0f0;
+    --text-muted: #8888aa;
+    --border: #2a2a4a;
+    --serial: #e74c3c;
+    --p2: #3498db;
+    --p4: #2ecc71;
+    --p8: #f39c12;
+    --phw: #9b59b6;
+  }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; min-height: 100vh; }
+  h1 { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
+  h2 { font-size: 1.1rem; font-weight: 600; color: var(--text); margin-bottom: 12px; }
+  h3 { font-size: 0.95rem; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; }
+
+  /* Header */
+  #header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  #header label { cursor: pointer; background: var(--accent); color: #fff; padding: 6px 14px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; transition: opacity 0.2s; }
+  #header label:hover { opacity: 0.85; }
+  #file-input { display: none; }
+  #load-status { color: var(--text-muted); font-size: 0.85rem; }
+
+  /* Scenario tabs */
+  #scenario-bar { background: var(--surface2); border-bottom: 1px solid var(--border); padding: 0 20px; display: flex; gap: 4px; overflow-x: auto; min-height: 38px; align-items: flex-end; }
+  .scenario-tab { padding: 8px 16px; cursor: pointer; border-radius: 6px 6px 0 0; border: 1px solid transparent; border-bottom: none; color: var(--text-muted); font-size: 0.85rem; white-space: nowrap; transition: all 0.2s; }
+  .scenario-tab:hover { color: var(--text); background: var(--border); }
+  .scenario-tab.active { background: var(--bg); border-color: var(--border); color: var(--accent); font-weight: 600; }
+
+  /* Main tabs */
+  #tabs-bar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 20px; display: flex; gap: 2px; }
+  .tab-btn { padding: 10px 18px; cursor: pointer; border: none; background: none; color: var(--text-muted); font-size: 0.9rem; border-bottom: 3px solid transparent; transition: all 0.2s; }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+  /* Content */
+  #content { padding: 20px; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Cards */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+
+  /* Charts */
+  .chart-wrap { position: relative; width: 100%; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { background: var(--surface2); color: var(--text-muted); font-weight: 600; padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  td { padding: 7px 12px; border-bottom: 1px solid var(--border); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .good { color: #2ecc71; font-weight: 600; }
+  .warn { color: #f39c12; }
+  .bad { color: #e74c3c; }
+
+  /* Performance tab */
+  #perf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { #perf-grid { grid-template-columns: 1fr; } }
+
+  /* Stage tab */
+  #stage-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+
+  /* Step Navigator */
+  #nav-layout { display: grid; grid-template-columns: 1fr 380px; gap: 16px; }
+  @media (max-width: 1100px) { #nav-layout { grid-template-columns: 1fr; } }
+
+  #nav-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  #nav-controls select, #nav-controls button { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 0.85rem; cursor: pointer; }
+  #nav-controls button { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; transition: opacity 0.2s; }
+  #nav-controls button:hover { opacity: 0.85; }
+  #nav-controls button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  /* Stage pips */
+  #pips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .pip { cursor: pointer; padding: 5px 11px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; border: 2px solid transparent; transition: all 0.2s; opacity: 0.5; }
+  .pip.active { opacity: 1; border-color: #fff; }
+  .pip:hover { opacity: 0.85; }
+
+  /* Topology SVG container */
+  #topo-wrap { background: var(--surface2); border-radius: 10px; border: 1px solid var(--border); overflow: hidden; width: 100%; }
+  #topo-svg { width: 100%; display: block; }
+
+  /* Stage detail card */
+  #stage-detail { background: var(--surface2); border-radius: 10px; border: 1px solid var(--border); padding: 16px; }
+  #stage-detail h3 { color: var(--accent); font-size: 1rem; margin-bottom: 10px; }
+  .detail-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .detail-row:last-child { border-bottom: none; }
+  .detail-key { color: var(--text-muted); }
+  .detail-val { color: var(--text); font-weight: 600; }
+  .thread-list { margin-top: 10px; }
+  .thread-chip { display: inline-block; background: var(--border); border-radius: 4px; padding: 2px 7px; font-size: 0.75rem; margin: 2px; }
+
+  /* Packet flow */
+  #pf-controls { display: flex; gap: 10px; margin-bottom: 14px; align-items: center; flex-wrap: wrap; }
+  #pf-controls select, #pf-controls input { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 0.85rem; }
+  #pf-count { color: var(--text-muted); font-size: 0.85rem; }
+  #pf-table-wrap { max-height: 520px; overflow-y: auto; }
+
+  /* Empty state */
+  #empty-state { text-align: center; padding: 80px 20px; color: var(--text-muted); }
+  #empty-state h2 { color: var(--text); font-size: 1.4rem; margin-bottom: 12px; }
+  #empty-state p { font-size: 0.95rem; line-height: 1.7; }
+
+  /* Color mode badges */
+  .mode-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; font-weight: 700; color: #fff; }
+
+  /* Stage color dots */
+  .stage-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--surface); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* Configure & Run tab */
+  .cfg-label { display:block; font-size:0.78rem; color:var(--text-muted); margin-bottom:4px; }
+  .cfg-input { width:100%; padding:7px 10px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); color:var(--text); font-size:0.9rem; }
+  .cfg-input:focus { outline:none; border-color:var(--accent); }
+  .thread-toggle { display:flex; align-items:center; gap:6px; padding:6px 12px; border-radius:6px; border:1px solid var(--border); cursor:pointer; font-size:0.85rem; color:var(--text-muted); transition:all 0.15s; }
+  .thread-toggle:has(input:checked) { border-color:var(--accent); color:var(--text); background:rgba(233,69,96,0.08); }
+  .server-ok { background:rgba(46,204,113,0.12); border:1px solid #2ecc71; border-radius:8px; padding:10px 16px; color:#2ecc71; font-size:0.88rem; }
+  .server-err { background:rgba(231,76,60,0.12); border:1px solid #e74c3c; border-radius:8px; padding:10px 16px; color:#e74c3c; font-size:0.88rem; }
+
+  /* Correctness tab */
+  .pass-cell { background: rgba(46,204,113,0.2); color: #2ecc71; font-weight:700; text-align:center; padding:6px 10px; border-radius:4px; font-size:0.82rem; }
+  .fail-cell { background: rgba(231,76,60,0.2); color: #e74c3c; font-weight:700; text-align:center; padding:6px 10px; border-radius:4px; font-size:0.82rem; }
+  .na-cell { color: var(--text-muted); text-align:center; padding:6px 10px; font-size:0.82rem; }
+  .overall-pass { background: rgba(46,204,113,0.15); border:2px solid #2ecc71; border-radius:8px; padding:14px 20px; text-align:center; font-size:1.1rem; font-weight:700; color:#2ecc71; margin-top:16px; }
+  .overall-fail { background: rgba(231,76,60,0.15); border:2px solid #e74c3c; border-radius:8px; padding:14px 20px; text-align:center; font-size:1.1rem; font-weight:700; color:#e74c3c; margin-top:16px; }
+  #corr-scenario-tabs { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+  .corr-stab { padding:6px 14px; border-radius:20px; border:2px solid var(--border); cursor:pointer; font-size:0.82rem; color:var(--text-muted); transition:all 0.2s; }
+  .corr-stab.active { border-color:var(--accent); color:var(--accent); font-weight:600; }
+  /* Tier selector labels */
+  .tier-label { cursor:pointer; display:flex; align-items:center; gap:6px; padding:6px 14px; border-radius:6px; border:2px solid var(--border); color:var(--text-muted); font-size:0.85rem; transition:all 0.2s; }
+  .tier-label:has(input:checked) { border-color:var(--accent); color:var(--accent); font-weight:600; }
+  .section-head { display:flex; justify-content:space-between; align-items:flex-end; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  .section-head p { color:var(--text-muted); font-size:0.86rem; line-height:1.5; max-width:720px; }
+  .metric-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:16px; }
+  .metric-card { background: var(--surface2); border:1px solid var(--border); border-radius:10px; padding:14px; }
+  .metric-kicker { color:var(--text-muted); font-size:0.74rem; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:7px; }
+  .metric-value { color:var(--text); font-size:1.35rem; font-weight:700; line-height:1.15; }
+  .metric-sub { color:var(--text-muted); font-size:0.82rem; line-height:1.45; margin-top:7px; }
+  .summary-grid { display:grid; grid-template-columns:minmax(320px, 1.15fr) minmax(300px, 0.85fr); gap:16px; }
+  @media (max-width: 1050px) { .summary-grid { grid-template-columns:1fr; } }
+  .summary-list { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+  @media (max-width: 700px) { .summary-list { grid-template-columns:1fr; } }
+  .summary-item { background: rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:10px; padding:12px; }
+  .summary-item .label { color:var(--text-muted); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
+  .summary-item .value { color:var(--text); font-size:0.96rem; font-weight:600; line-height:1.4; }
+  .sentence-card { margin-top:14px; padding:14px 16px; border-radius:10px; background:linear-gradient(135deg, rgba(233,69,96,0.12), rgba(13,59,102,0.24)); border:1px solid rgba(233,69,96,0.25); color:var(--text); line-height:1.6; }
+  .chip-row { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+  .soft-chip { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; background:rgba(255,255,255,0.05); border:1px solid var(--border); color:var(--text); font-size:0.8rem; }
+  .chart-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width: 980px) { .chart-grid-2 { grid-template-columns:1fr; } }
+  .chart-note { margin-top:10px; color:var(--text-muted); font-size:0.82rem; line-height:1.5; }
+  .insight-list { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; }
+  .insight-card { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:14px; }
+  .insight-card h3 { margin-bottom:8px; color:var(--text); }
+  .insight-card p { color:var(--text-muted); font-size:0.84rem; line-height:1.55; margin-bottom:12px; }
+  .jump-tab-btn { border:none; border-radius:8px; padding:8px 12px; background:var(--accent); color:#fff; font-weight:700; font-size:0.82rem; cursor:pointer; }
+  .jump-tab-btn.secondary { background:var(--surface3); }
+  .status-badge { display:inline-block; padding:3px 8px; border-radius:999px; font-size:0.74rem; font-weight:700; }
+  .status-badge.good { background:rgba(46,204,113,0.18); color:#2ecc71; }
+  .status-badge.warn { background:rgba(243,156,18,0.18); color:#f39c12; }
+  .status-badge.bad { background:rgba(231,76,60,0.18); color:#e74c3c; }
+  .table-note { color:var(--text-muted); font-size:0.8rem; margin-top:10px; line-height:1.5; }
+  .fail-summary-table td code { font-size:0.8rem; color:#ffd0d0; }
+  .topology-mini-wrap { background: radial-gradient(circle at top, rgba(26,188,156,0.08), transparent 45%), var(--surface2); border:1px solid var(--border); border-radius:10px; padding:12px; }
+  .topology-mini-caption { margin-top:10px; color:var(--text-muted); font-size:0.8rem; line-height:1.45; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>NSX Leaf-Spine Trace Visualizer</h1>
+  <label for="file-input">Load Trace / Output Files</label>
+  <input type="file" id="file-input" multiple accept=".txt">
+  <span id="load-status">No files loaded</span>
+</div>
+
+<div id="scenario-bar" style="display:none"></div>
+
+<div id="tabs-bar">
+  <button class="tab-btn" data-tab="overview" id="tab-overview-btn">Overview</button>
+  <button class="tab-btn active" data-tab="perf">Performance</button>
+  <button class="tab-btn" data-tab="corr" id="tab-corr-btn">Correctness</button>
+  <button class="tab-btn" data-tab="stage">Stage Breakdown</button>
+  <button class="tab-btn" data-tab="nav">Step Navigator</button>
+  <button class="tab-btn" data-tab="pf" id="tab-pf-btn">Packet Flow</button>
+  <button class="tab-btn" data-tab="cfg" id="tab-cfg-btn">Configure &amp; Run</button>
+</div>
+
+<div id="content">
+  <div id="empty-state">
+    <h2>Load simulator trace files to begin</h2>
+    <p>Click <strong>Load Trace / Output Files</strong> above and select <code>sim_trace_a.txt</code>, <code>sim_trace_b.txt</code>, <code>sim_trace_c.txt</code>, or <code>sim_output.txt</code>.<br><br>
+    Multiple scenarios can be loaded simultaneously and compared via the scenario selector tabs.</p>
+  </div>
+
+  <div id="tab-overview" class="tab-panel" style="display:none"></div>
+
+  <div id="tab-perf" class="tab-panel" style="display:none">
+    <div id="perf-summary-grid" class="metric-grid"></div>
+    <div id="perf-grid">
+      <div class="card">
+        <h2>Wall Time by Mode (ms)</h2>
+        <div class="chart-wrap" style="height:280px"><canvas id="chart-perf"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Speedup vs Serial</h2>
+        <div class="chart-wrap" style="height:280px"><canvas id="chart-speedup"></canvas></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="chart-note">Reported wall time uses a warmed-up benchmark pass without tracing. Stage breakdown and packet drill-down come from the separate traced validation run, so those totals may differ slightly.</div>
+    </div>
+    <div class="card">
+      <h2>Mode Comparison</h2>
+      <div id="perf-table-wrap"></div>
+    </div>
+    <div class="card">
+      <h2>Delivery Statistics</h2>
+      <div id="delivery-stats-wrap"></div>
+    </div>
+  </div>
+
+  <div id="tab-stage" class="tab-panel" style="display:none">
+    <div class="card">
+      <h2>Stage Timing — Grouped by Stage (wall_us)</h2>
+      <div class="chart-wrap" id="chart-stage-wrap" style="height:320px"><canvas id="chart-stage"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Per-Stage Timing Table</h2>
+      <div id="stage-table-wrap" style="overflow-x:auto"></div>
+    </div>
+  </div>
+
+  <div id="tab-nav" class="tab-panel" style="display:none">
+    <div id="nav-controls">
+      <label style="color:var(--text-muted);font-size:0.85rem">Mode:</label>
+      <select id="nav-mode-select"></select>
+      <button id="nav-prev" disabled>&#8592; Prev</button>
+      <button id="nav-next" disabled>Next &#8594;</button>
+      <span id="nav-stage-label" style="color:var(--text-muted);font-size:0.85rem"></span>
+    </div>
+    <div id="pips"></div>
+    <div id="nav-layout">
+      <div id="topo-wrap"><svg id="topo-svg" viewBox="0 0 700 320"></svg></div>
+      <div id="stage-detail"><p style="color:var(--text-muted)">Select a mode and navigate stages.</p></div>
+    </div>
+  </div>
+
+  <div id="tab-pf" class="tab-panel" style="display:none">
+    <div class="card">
+      <div id="pf-controls">
+        <label style="color:var(--text-muted)">Src NIC:</label>
+        <select id="pf-src-filter"></select>
+        <span id="pf-count"></span>
+      </div>
+      <div id="pf-table-wrap">
+        <table id="pf-table">
+          <thead><tr>
+            <th>Pkt ID</th><th>Src NIC</th><th>Dst NIC</th>
+            <th class="num">Emit (ns)</th><th class="num">Delivered (ns)</th><th class="num">Latency (ns)</th>
+          </tr></thead>
+          <tbody id="pf-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="tab-corr" class="tab-panel" style="display:none">
+  </div>
+
+  <div id="tab-cfg" class="tab-panel" style="display:none">
+    <div id="cfg-server-banner" class="card" style="margin-bottom:12px"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+
+      <!-- LEFT: topology + sim params -->
+      <div>
+        <div class="card">
+          <h2>Topology</h2>
+          <div style="margin-bottom:12px">
+            <label style="color:var(--text-muted);font-size:0.82rem">Tier</label>
+            <div style="display:flex;gap:8px;margin-top:6px">
+              <label class="tier-label">
+                <input type="radio" name="tier" value="2" checked style="accent-color:var(--accent)"> 2-Tier Leaf/Spine
+              </label>
+              <label class="tier-label">
+                <input type="radio" name="tier" value="3" style="accent-color:var(--accent)"> 3-Tier NIC→ToR→Agg→Core
+              </label>
+            </div>
+          </div>
+          <div style="margin-bottom:12px">
+            <label style="color:var(--text-muted);font-size:0.82rem">Topology input</label>
+            <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+              <label class="tier-label">
+                <input type="radio" name="topo-input-mode" value="manual" checked style="accent-color:var(--accent)"> Manual counts
+              </label>
+              <label class="tier-label">
+                <input type="radio" name="topo-input-mode" value="ports" style="accent-color:var(--accent)"> Auto from port counts
+              </label>
+            </div>
+          </div>
+          <div id="cfg-manual-topo">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+              <div><label class="cfg-label" id="lbl-spine">Spine switches</label><input class="cfg-input" id="cfg-spine" type="number" value="4" min="1" max="32"></div>
+              <div><label class="cfg-label" id="lbl-leaf">Leaf switches</label><input class="cfg-input" id="cfg-leaf" type="number" value="4" min="1" max="64"></div>
+              <div><label class="cfg-label" id="lbl-npl">NICs / leaf</label><input class="cfg-input" id="cfg-npl" type="number" value="4" min="1" max="64"></div>
+            </div>
+            <div id="cfg-agg-row" style="margin-top:10px;display:none">
+              <label class="cfg-label">Aggregation (Agg) switches</label>
+              <input class="cfg-input" id="cfg-agg" type="number" value="4" min="1" max="64" style="max-width:200px">
+            </div>
+          </div>
+          <div id="cfg-auto-topo" style="display:none">
+            <div id="cfg-auto-2tier" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+              <div><label class="cfg-label">Ports / spine switch</label><input class="cfg-input" id="cfg-auto-spine-ports" type="number" value="8" min="2" max="256"></div>
+              <div><label class="cfg-label">Ports / leaf switch</label><input class="cfg-input" id="cfg-auto-leaf-ports" type="number" value="8" min="2" max="256"></div>
+            </div>
+            <div id="cfg-auto-3tier" style="display:none;grid-template-columns:1fr 1fr 1fr;gap:10px">
+              <div><label class="cfg-label">Ports / core switch</label><input class="cfg-input" id="cfg-auto-core-ports" type="number" value="16" min="2" max="256"></div>
+              <div><label class="cfg-label">Ports / aggregation switch</label><input class="cfg-input" id="cfg-auto-agg-ports" type="number" value="16" min="2" max="256"></div>
+              <div><label class="cfg-label">Ports / ToR switch</label><input class="cfg-input" id="cfg-auto-tor-ports" type="number" value="16" min="2" max="256"></div>
+            </div>
+            <div id="cfg-auto-topo-note" style="margin-top:10px;font-size:0.8rem;color:var(--text-muted);line-height:1.55"></div>
+          </div>
+          <div id="cfg-topo-summary" style="margin-top:10px;font-size:0.82rem;color:var(--text-muted);line-height:1.6"></div>
+        </div>
+
+        <div class="card">
+          <h2>Simulation Parameters</h2>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+            <div><label class="cfg-label">Packets / NIC</label><input class="cfg-input" id="cfg-pkts" type="number" value="200" min="1" max="10000"></div>
+            <div><label class="cfg-label">NIC interval (ns)</label><input class="cfg-input" id="cfg-interval" type="number" value="10" min="1" max="1000" step="0.1"></div>
+            <div><label class="cfg-label">Link delay (ns)</label><input class="cfg-input" id="cfg-delay" type="number" value="5" min="0" max="1000" step="0.1"></div>
+          </div>
+          <div style="margin-top:10px">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:0.85rem;color:var(--text-muted)">
+              <input type="checkbox" id="cfg-verbose" style="accent-color:var(--accent)">
+              Verbose trace (logs every packet event — only practical for small topologies)
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: parallelization + run -->
+      <div>
+        <div class="card">
+          <h2>Parallelization</h2>
+          <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:12px">Serial is always included. Select exactly which parallel thread counts to benchmark:</p>
+          <div style="display:flex;flex-wrap:wrap;gap:10px" id="cfg-threads-wrap">
+            <label class="thread-toggle"><input type="checkbox" value="-1"> HW threads (auto)</label>
+            <label class="thread-toggle"><input type="checkbox" value="1"> 1 thread</label>
+            <label class="thread-toggle"><input type="checkbox" value="2" checked> 2 threads</label>
+            <label class="thread-toggle"><input type="checkbox" value="4" checked> 4 threads</label>
+            <label class="thread-toggle"><input type="checkbox" value="8"> 8 threads</label>
+            <label class="thread-toggle"><input type="checkbox" value="16"> 16 threads</label>
+            <label class="thread-toggle"><input type="checkbox" value="32"> 32 threads</label>
+          </div>
+          <div style="margin-top:14px;font-size:0.82rem;color:var(--text-muted)" id="cfg-thread-note"></div>
+        </div>
+
+        <div class="card">
+          <h2>Scenario Name</h2>
+          <input class="cfg-input" id="cfg-name" type="text" value="Custom" style="width:100%">
+        </div>
+
+        <div class="card" style="text-align:center">
+          <button id="cfg-run-btn" style="background:var(--accent);color:#fff;border:none;padding:12px 36px;border-radius:8px;font-size:1rem;font-weight:700;cursor:pointer;transition:opacity 0.2s;width:100%" onclick="runSimulation()">
+            &#9654; Run Simulation
+          </button>
+          <div id="cfg-run-status" style="margin-top:10px;font-size:0.85rem;color:var(--text-muted)"></div>
+        </div>
+
+        <div class="card" id="cfg-log-card" style="display:none">
+          <h2>Output</h2>
+          <pre id="cfg-log" style="font-size:0.78rem;color:var(--text-muted);max-height:280px;overflow-y:auto;white-space:pre-wrap;word-break:break-all"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// CONSTANTS & CONFIG
+// ============================================================
+const MODE_COLORS = {
+  'Serial': '#e74c3c',
+  'Parallel(2 threads)': '#3498db',
+  'Parallel(4 threads)': '#2ecc71',
+  'Parallel(8 threads)': '#f39c12',
+  'Parallel(hw threads)': '#9b59b6',
+};
+const STAGE_COLORS = ['#e74c3c','#e67e22','#f1c40f','#2ecc71','#1abc9c','#3498db','#9b59b6','#e91e63','#ff5722','#00bcd4','#8bc34a'];
+// 2-tier uses indices 0-6; 3-tier uses all 11 — must match kStageNames[] in simulator.h
+const STAGE_NAMES = ['NIC_MODULES','NIC_UPLINKS','TOR_FWD','TOR_TO_AGG','AGG_FWD_UP','AGG_TO_CORE','CORE_FWD','CORE_EGRESS','AGG_FWD_DOWN','AGG_TO_TOR','TOR_EGRESS'];
+const STAGE_LABELS = STAGE_NAMES.map((n, i) => `${i}: ${n}`);
+
+function getModeColor(mode) {
+  if (MODE_COLORS[mode]) return MODE_COLORS[mode];
+  if (/Parallel\(hw threads(?:=\d+)?\)/i.test(mode)) return '#9b59b6';
+  if (mode.includes('Parallel')) return '#f39c12';
+  return '#aaaaaa';
+}
+
+function modeBadge(mode) {
+  const c = getModeColor(mode);
+  return `<span class="mode-badge" style="background:${c}">${mode}</span>`;
+}
+
+function escapeHTML(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function getModeSortKey(mode) {
+  if (mode === 'Serial') return -1;
+  if (/Parallel\(hw threads(?:=\d+)?\)/i.test(mode)) return 1000;
+  const m = mode.match(/Parallel\((\d+) threads?\)/i);
+  return m ? parseInt(m[1]) : 999;
+}
+
+function getModeAxisLabel(mode) {
+  if (mode === 'Serial') return 'Serial';
+  if (/Parallel\(hw threads(?:=\d+)?\)/i.test(mode)) return 'HW';
+  const m = mode.match(/Parallel\((\d+) threads?\)/i);
+  return m ? `${m[1]}T` : mode;
+}
+
+function getModeData(d) {
+  const runs = d.runs || [];
+  const comp = d.comparison;
+  let modeData = [];
+
+  if (comp && comp.modes.length) {
+    modeData = comp.modes.map((m, idx) => {
+      const dupes = comp.modes.filter(x => x.mode === m.mode);
+      if (dupes.length > 1) {
+        const runNum = comp.modes.slice(0, idx).filter(x => x.mode === m.mode).length + 1;
+        return { ...m, displayMode: `${m.mode} (run ${runNum})` };
+      }
+      return { ...m, displayMode: m.mode };
+    });
+  } else {
+    modeData = runs.map(r => ({
+      mode: r.mode,
+      displayMode: r.mode,
+      wall_ms: r.wall_ms,
+      delivered: r.delivered,
+      rate: r.rate,
+    }));
+  }
+
+  return modeData.slice().sort((a, b) => {
+    const keyDiff = getModeSortKey(a.mode) - getModeSortKey(b.mode);
+    if (keyDiff !== 0) return keyDiff;
+    return (a.displayMode || a.mode).localeCompare(b.displayMode || b.mode);
+  });
+}
+
+function getStageNamesFromData(d) {
+  const seen = new Set();
+  const derived = [];
+  (d.runs || []).forEach(r => {
+    (r.stages || []).forEach(s => {
+      if (!seen.has(s.name)) {
+        seen.add(s.name);
+        derived.push(s.name);
+      }
+    });
+  });
+  return derived.length ? derived : STAGE_NAMES;
+}
+
+function getSerialMode(modeData) {
+  return modeData.find(m => m.mode === 'Serial') || null;
+}
+
+function getBestParallelMode(modeData) {
+  const parallel = modeData.filter(m => m.mode !== 'Serial');
+  return parallel.reduce((best, cur) => (!best || cur.wall_ms < best.wall_ms ? cur : best), null);
+}
+
+function getFastestMode(modeData) {
+  return modeData.reduce((best, cur) => (!best || cur.wall_ms < best.wall_ms ? cur : best), null);
+}
+
+function getExpectedPacketCount(config) {
+  const totalNICs = parseInt(config.total_nics) || ((parseInt(config.num_leaf) || 0) * (parseInt(config.nics_per_leaf) || 0));
+  const perNIC = parseInt(config.num_packets) || 0;
+  return totalNICs && perNIC ? totalNICs * perNIC : 0;
+}
+
+function getUniqueModes(modeData) {
+  const seen = new Set();
+  return modeData.filter(m => {
+    if (seen.has(m.mode)) return false;
+    seen.add(m.mode);
+    return true;
+  });
+}
+
+function sortModeEntries(entries) {
+  return entries.slice().sort((a, b) => {
+    const keyDiff = getModeSortKey(a.mode) - getModeSortKey(b.mode);
+    if (keyDiff !== 0) return keyDiff;
+    return String(a.displayMode || a.mode).localeCompare(String(b.displayMode || b.mode));
+  });
+}
+
+function normalizeScenarioLabel(label) {
+  return String(label || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function getActiveCorrectnessScenario(d) {
+  if (!simOutputLoaded || !simOutputScenarios.length) return { index: -1, scenario: null };
+
+  let simIdx = activeSimScenarioIdx;
+  if (d && d.scenario) {
+    const exact = simOutputScenarios.findIndex(s => normalizeScenarioLabel(s.label) === normalizeScenarioLabel(d.scenario));
+    if (exact >= 0) {
+      simIdx = exact;
+    } else {
+      const letterMatch = d.scenario.match(/Scenario\s+([A-Z])/i);
+      if (letterMatch) {
+        const letter = letterMatch[1].toUpperCase();
+        const found = simOutputScenarios.findIndex(s => {
+          const sm = s.label.match(/Scenario\s+([A-Z])/i);
+          return sm && sm[1].toUpperCase() === letter;
+        });
+        if (found >= 0) simIdx = found;
+      }
+    }
+  }
+
+  activeSimScenarioIdx = Math.max(0, Math.min(simIdx, simOutputScenarios.length - 1));
+  return { index: activeSimScenarioIdx, scenario: simOutputScenarios[activeSimScenarioIdx] || null };
+}
+
+function getPrettyTestName(name) {
+  const labels = {
+    packet_conservation: 'Packet conservation',
+    no_duplicate_packets: 'No duplicates',
+    correct_destinations: 'Correct destinations',
+    arrival_times: 'Arrival times',
+    serial_vs_parallel_packetwise: 'Serial vs parallel packetwise',
+  };
+  return labels[name] || name.replace(/_/g, ' ');
+}
+
+function getRoutingDescription(d) {
+  const routes = (d.packet_routes || []).slice().sort((a, b) => a.src - b.src);
+  if (!routes.length) return 'Routing rule not logged in this trace';
+
+  const total = parseInt(d.config.total_nics) || routes.length;
+  const uniqueSrc = new Set(routes.map(r => r.src));
+  const uniqueDst = new Set(routes.map(r => r.dst));
+  if (routes.length === uniqueSrc.size && routes.length === uniqueDst.size) {
+    const deltas = routes.map(r => ((r.dst - r.src) % total + total) % total);
+    const sameOffset = deltas.every(delta => delta === deltas[0]);
+    if (sameOffset) return `Fixed permutation: dst = (src + ${deltas[0]}) mod ${total}`;
+    return 'Fixed one-to-one permutation routing';
+  }
+  return 'Explicit route map captured in the trace';
+}
+
+function buildExperimentSentence(d, modeData) {
+  const tier = parseInt(d.config.num_tiers) === 3 || (d.nodes.aggs && d.nodes.aggs.length > 0) ? 3 : 2;
+  const totalNICs = parseInt(d.config.total_nics) || d.nodes.nics.length || 0;
+  const nicInterval = parseFloat(d.config.nic_interval_ns);
+  const linkDelay = parseFloat(d.config.link_delay_ns);
+  const uniqueModes = getUniqueModes(modeData).map(m => m.mode);
+  const routing = getRoutingDescription(d).replace(/^Fixed /, 'fixed ').replace(/^Explicit /, 'explicit ');
+  return `We simulated a ${tier}-tier leaf-spine network with ${totalNICs} NICs, ${parseInt(d.config.num_packets) || 0} packets per NIC, ${nicInterval.toFixed(1)} ns injection spacing, ${linkDelay.toFixed(1)} ns link delay, and ${routing}, then compared ${uniqueModes.join(', ')} under identical traffic.`;
+}
+
+function getSpeedupSummary(speedup) {
+  if (speedup === null || speedup === undefined) return 'No serial baseline available';
+  if (Math.abs(speedup - 1) < 0.001) return 'Matches serial runtime';
+  const pct = Math.abs((speedup - 1) * 100).toFixed(1);
+  return speedup > 1 ? `${pct}% faster than serial` : `${pct}% slower than serial`;
+}
+
+function renderScenarioMiniTopology(d) {
+  const config = d.config || {};
+  const tier = parseInt(config.num_tiers) === 3 || (d.nodes.aggs && d.nodes.aggs.length > 0) ? 3 : 2;
+  const numCore = parseInt(config.num_spine) || d.nodes.spines.length || 0;
+  const numAgg = parseInt(config.num_agg) || d.nodes.aggs.length || 0;
+  const numTor = parseInt(config.num_leaf) || d.nodes.leaves.length || 0;
+  const numNICs = parseInt(config.total_nics) || d.nodes.nics.length || 0;
+  const route = (d.packet_routes && d.packet_routes.length) ? d.packet_routes[0] : { src: 0, dst: Math.max(1, Math.floor(numNICs / 2)) };
+  const srcLeaf = (d.nodes.nics.find(n => n.id === route.src) || {}).leaf ?? 0;
+  const dstLeaf = (d.nodes.nics.find(n => n.id === route.dst) || {}).leaf ?? Math.max(0, Math.min(numTor - 1, 1));
+  const srcAgg = 0;
+  const dstAgg = Math.max(0, numAgg - 1);
+  const coreIdx = 0;
+
+  const W = 520;
+  const H = tier === 3 ? 290 : 240;
+  const accent = '#e94560';
+  const faint = '#39507f';
+  const text = '#cfd7ff';
+  const muted = '#8c95bb';
+
+  function rect(x, y, label, active, w = 84, h = 30) {
+    return `<rect x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}" rx="8" fill="${active ? 'rgba(233,69,96,0.16)' : 'rgba(255,255,255,0.03)'}" stroke="${active ? accent : faint}" stroke-width="${active ? 2 : 1.2}"/>`
+      + `<text x="${x}" y="${y + 5}" text-anchor="middle" font-size="11" font-weight="${active ? 700 : 600}" fill="${active ? '#ffffff' : text}">${escapeHTML(label)}</text>`;
+  }
+
+  function circle(x, y, label, active) {
+    return `<circle cx="${x}" cy="${y}" r="14" fill="${active ? '#f95d42' : 'rgba(255,255,255,0.04)'}" stroke="${active ? '#f95d42' : faint}" stroke-width="${active ? 2 : 1.2}"/>`
+      + `<text x="${x}" y="${y + 4}" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">${escapeHTML(label)}</text>`;
+  }
+
+  function line(x1, y1, x2, y2, active) {
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${active ? accent : faint}" stroke-width="${active ? 3 : 1.2}" opacity="${active ? 0.95 : 0.35}"/>`;
+  }
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" aria-label="Scenario topology summary">`;
+  svg += `<rect x="0" y="0" width="${W}" height="${H}" rx="12" fill="transparent"/>`;
+
+  if (tier === 3) {
+    const srcNIC = { x: 92, y: 238 };
+    const srcTorNode = { x: 150, y: 178 };
+    const srcAggNode = { x: 210, y: 110 };
+    const coreNode = { x: 260, y: 48 };
+    const dstAggNode = { x: 320, y: 110 };
+    const dstTorNode = { x: 382, y: 178 };
+    const dstNIC = { x: 438, y: 238 };
+
+    svg += `<text x="22" y="52" font-size="12" fill="${muted}" font-weight="700">Core x${numCore}</text>`;
+    svg += `<text x="22" y="114" font-size="12" fill="${muted}" font-weight="700">Agg x${numAgg}</text>`;
+    svg += `<text x="22" y="182" font-size="12" fill="${muted}" font-weight="700">ToR x${numTor}</text>`;
+    svg += `<text x="22" y="242" font-size="12" fill="${muted}" font-weight="700">NIC x${numNICs}</text>`;
+
+    svg += line(srcNIC.x, srcNIC.y - 14, srcTorNode.x, srcTorNode.y + 15, true);
+    svg += line(srcTorNode.x, srcTorNode.y - 15, srcAggNode.x, srcAggNode.y + 15, true);
+    svg += line(srcAggNode.x, srcAggNode.y - 15, coreNode.x, coreNode.y + 15, true);
+    svg += line(coreNode.x, coreNode.y + 15, dstAggNode.x, dstAggNode.y - 15, true);
+    svg += line(dstAggNode.x, dstAggNode.y + 15, dstTorNode.x, dstTorNode.y - 15, true);
+    svg += line(dstTorNode.x, dstTorNode.y + 15, dstNIC.x, dstNIC.y - 14, true);
+
+    svg += rect(srcAggNode.x, srcAggNode.y, `A${srcAgg}`, true);
+    svg += rect(coreNode.x, coreNode.y, `C${coreIdx}`, true);
+    svg += rect(dstAggNode.x, dstAggNode.y, `A${dstAgg}`, true);
+    svg += rect(srcTorNode.x, srcTorNode.y, `T${srcLeaf}`, true);
+    svg += rect(dstTorNode.x, dstTorNode.y, `T${dstLeaf}`, true);
+    svg += circle(srcNIC.x, srcNIC.y, route.src, true);
+    svg += circle(dstNIC.x, dstNIC.y, route.dst, true);
+    svg += `<text x="${W / 2}" y="${H - 16}" text-anchor="middle" font-size="12" fill="${text}">Example path: NIC-${route.src} → T${srcLeaf} → A${srcAgg} → C${coreIdx} → A${dstAgg} → T${dstLeaf} → NIC-${route.dst}</text>`;
+  } else {
+    const srcNIC = { x: 118, y: 196 };
+    const srcLeafNode = { x: 176, y: 122 };
+    const spineNode = { x: 260, y: 54 };
+    const dstLeafNode = { x: 342, y: 122 };
+    const dstNIC = { x: 402, y: 196 };
+
+    svg += `<text x="22" y="56" font-size="12" fill="${muted}" font-weight="700">Spine x${numCore}</text>`;
+    svg += `<text x="22" y="126" font-size="12" fill="${muted}" font-weight="700">Leaf x${numTor}</text>`;
+    svg += `<text x="22" y="200" font-size="12" fill="${muted}" font-weight="700">NIC x${numNICs}</text>`;
+
+    svg += line(srcNIC.x, srcNIC.y - 14, srcLeafNode.x, srcLeafNode.y + 15, true);
+    svg += line(srcLeafNode.x, srcLeafNode.y - 15, spineNode.x, spineNode.y + 15, true);
+    svg += line(spineNode.x, spineNode.y + 15, dstLeafNode.x, dstLeafNode.y - 15, true);
+    svg += line(dstLeafNode.x, dstLeafNode.y + 15, dstNIC.x, dstNIC.y - 14, true);
+
+    svg += rect(spineNode.x, spineNode.y, 'S0', true);
+    svg += rect(srcLeafNode.x, srcLeafNode.y, `L${srcLeaf}`, true);
+    svg += rect(dstLeafNode.x, dstLeafNode.y, `L${dstLeaf}`, true);
+    svg += circle(srcNIC.x, srcNIC.y, route.src, true);
+    svg += circle(dstNIC.x, dstNIC.y, route.dst, true);
+    svg += `<text x="${W / 2}" y="${H - 16}" text-anchor="middle" font-size="12" fill="${text}">Example path: NIC-${route.src} → L${srcLeaf} → S0 → L${dstLeaf} → NIC-${route.dst}</text>`;
+  }
+
+  svg += `</svg>`;
+  return svg;
+}
+
+function buildPerfMetricCards(d, modeData) {
+  const serial = getSerialMode(modeData);
+  const fastest = getFastestMode(modeData);
+  const bestParallel = getBestParallelMode(modeData);
+  const expectedPackets = getExpectedPacketCount(d.config);
+  const stableDelivered = modeData.length > 0 && modeData.every(m => m.delivered === modeData[0].delivered);
+  const bestParallelSpeedup = serial && bestParallel ? serial.wall_ms / bestParallel.wall_ms : null;
+  const firstDelivered = modeData.length ? modeData[0].delivered : 0;
+
+  return `
+    <div class="metric-card">
+      <div class="metric-kicker">Fastest mode overall</div>
+      <div class="metric-value">${fastest ? fastest.wall_ms.toFixed(3) + ' ms' : '—'}</div>
+      <div class="metric-sub">${fastest ? `${escapeHTML(fastest.displayMode)} delivered ${fastest.delivered.toLocaleString()} packets.` : 'No mode data available.'}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-kicker">Best parallel speedup</div>
+      <div class="metric-value">${bestParallelSpeedup !== null ? bestParallelSpeedup.toFixed(2) + 'x' : '—'}</div>
+      <div class="metric-sub">${bestParallel ? `${escapeHTML(bestParallel.displayMode)}: ${getSpeedupSummary(bestParallelSpeedup)}` : 'No parallel mode was recorded for this scenario.'}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-kicker">Work completed</div>
+      <div class="metric-value">${firstDelivered.toLocaleString()}${expectedPackets ? ` / ${expectedPackets.toLocaleString()}` : ''}</div>
+      <div class="metric-sub">${stableDelivered ? 'All modes delivered the same number of packets.' : 'Delivered packet counts vary across modes, so performance must be interpreted carefully.'}</div>
+    </div>`;
+}
+
+function buildModeComparisonTableHTML(modeData, expectedPackets) {
+  const sortedModes = sortModeEntries(modeData);
+  const serial = getSerialMode(sortedModes);
+  const fastest = getFastestMode(sortedModes);
+
+  let html = '<table><thead><tr><th>Mode</th><th class="num">Wall (ms)</th><th class="num">Delivered</th><th class="num">Rate</th><th class="num">Speedup</th><th>Notes</th></tr></thead><tbody>';
+  sortedModes.forEach(m => {
+    const speedup = serial ? serial.wall_ms / m.wall_ms : null;
+    const deltaPct = serial && m.mode !== 'Serial' ? ((serial.wall_ms - m.wall_ms) / serial.wall_ms) * 100 : 0;
+    const note = m.mode === 'Serial'
+      ? 'Baseline'
+      : deltaPct >= 0
+        ? `${deltaPct.toFixed(1)}% faster than serial`
+        : `${Math.abs(deltaPct).toFixed(1)}% slower than serial`;
+    const speedupClass = speedup === null ? '' : speedup > 1 ? 'good' : speedup < 1 ? 'bad' : '';
+    const bestBadge = fastest && m.displayMode === fastest.displayMode ? ' <span class="status-badge good">Best runtime</span>' : '';
+    const deliveredText = expectedPackets ? `${m.delivered.toLocaleString()} / ${expectedPackets.toLocaleString()}` : m.delivered.toLocaleString();
+    html += `<tr>
+      <td>${modeBadge(m.mode)}${bestBadge}${m.displayMode !== m.mode ? ` <small style="color:var(--text-muted)">${escapeHTML(m.displayMode.replace(m.mode, '').trim())}</small>` : ''}</td>
+      <td class="num">${m.wall_ms.toFixed(3)}</td>
+      <td class="num">${deliveredText}</td>
+      <td class="num ${m.rate >= 100 ? 'good' : m.rate >= 95 ? 'warn' : 'bad'}">${m.rate.toFixed(1)}%</td>
+      <td class="num ${speedupClass}">${speedup !== null ? speedup.toFixed(2) + 'x' : '—'}</td>
+      <td>${escapeHTML(note)}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  return html;
+}
+
+function buildCorrectnessMatrixHTML(scenario) {
+  const allTestNames = ['packet_conservation', 'no_duplicate_packets', 'correct_destinations', 'arrival_times', 'serial_vs_parallel_packetwise'];
+  const corrModes = sortModeEntries(scenario.correctness || []);
+  let html = '<div style="overflow-x:auto"><table><thead><tr><th>Test</th>';
+  corrModes.forEach(cm => {
+    const suffix = cm.displayMode !== cm.mode ? `<br><small style="color:var(--text-muted);font-weight:400">${escapeHTML(cm.displayMode.replace(cm.mode, '').trim())}</small>` : '';
+    html += `<th style="text-align:center">${modeBadge(cm.mode)}${suffix}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+
+  allTestNames.forEach(testName => {
+    const isParallelOnly = testName === 'serial_vs_parallel_packetwise';
+    html += `<tr${isParallelOnly ? ' style="background:rgba(255,255,255,0.02)"' : ''}>`;
+    html += `<td>${escapeHTML(getPrettyTestName(testName))}</td>`;
+    corrModes.forEach(cm => {
+      const isSerial = cm.mode === 'Serial';
+      if (isParallelOnly && isSerial) {
+        html += '<td><span class="na-cell">N/A</span></td>';
+        return;
+      }
+      const testEntry = cm.tests.find(t => t.name === testName);
+      if (!testEntry) {
+        html += '<td><span class="na-cell">—</span></td>';
+        return;
+      }
+      const cls = testEntry.verdict === 'PASS' ? 'pass-cell' : 'fail-cell';
+      const escapedSummary = escapeHTML(testEntry.inline_summary);
+      html += `<td><span class="${cls}" title="${escapedSummary}">${testEntry.verdict}</span></td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function buildFailureDetailsHTML(scenario) {
+  const failures = [];
+  (scenario.correctness || []).forEach(cm => {
+    (cm.tests || []).forEach(test => {
+      if (test.verdict === 'FAIL') {
+        failures.push({
+          mode: cm.displayMode || cm.mode,
+          testName: test.name,
+          summary: test.inline_summary,
+        });
+      }
+    });
+  });
+
+  if (!failures.length) {
+    return '<div class="table-note">No failing checks were reported for this scenario, so the summary matrix is sufficient.</div>';
+  }
+
+  let html = '<div style="overflow-x:auto"><table class="fail-summary-table"><thead><tr><th>Mode</th><th>Failed check</th><th>Logged detail</th></tr></thead><tbody>';
+  failures.forEach(row => {
+    html += `<tr>
+      <td>${escapeHTML(row.mode)}</td>
+      <td><code>${escapeHTML(getPrettyTestName(row.testName))}</code></td>
+      <td>${escapeHTML(row.summary)}</td>
+    </tr>`;
+  });
+  html += '</tbody></table></div>';
+  html += '<div class="table-note">Packet-level mismatch rows are not present in the current simulator output, so this drill-down summarizes the failing mode/test details that were logged.</div>';
+  return html;
+}
+
+function attachJumpTabButtons(root) {
+  root.querySelectorAll('[data-jump-tab]').forEach(btn => {
+    btn.addEventListener('click', () => switchTab(btn.dataset.jumpTab));
+  });
+}
+
+// ============================================================
+// PARSER
+// ============================================================
+function parseTrace(text) {
+  const lines = text.split('\n');
+  const result = {
+    scenario: '',
+    config: {},
+    nodes: { nics: [], leaves: [], aggs: [], spines: [] },
+    links: { nic_uplinks: [], leaf_to_spine: [], spine_to_leaf: [] },
+    packet_routes: [],
+    runs: [],
+    comparison: null,
+  };
+
+  let currentRun = null;
+  let currentStage = null;
+  let inComparison = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // SCENARIO
+    if (trimmed.startsWith('SCENARIO ')) {
+      const m = trimmed.match(/SCENARIO "(.+)"/);
+      if (m) result.scenario = m[1];
+      continue;
+    }
+
+    // CONFIG
+    if (trimmed.startsWith('CONFIG ')) {
+      const pairs = trimmed.slice(7).matchAll(/(\w+)=([\d.]+)/g);
+      for (const p of pairs) result.config[p[1]] = parseFloat(p[2]);
+      continue;
+    }
+
+    // NODE
+    if (trimmed.startsWith('NODE ')) {
+      const mNIC = trimmed.match(/NODE NIC id=(\d+) leaf=(\d+)/);
+      if (mNIC) { result.nodes.nics.push({ id: parseInt(mNIC[1]), leaf: parseInt(mNIC[2]) }); continue; }
+      const mLeaf = trimmed.match(/NODE LEAF id=(\d+)/);
+      if (mLeaf) { result.nodes.leaves.push({ id: parseInt(mLeaf[1]) }); continue; }
+      const mAgg = trimmed.match(/NODE AGG id=(\d+)/);
+      if (mAgg) { result.nodes.aggs.push({ id: parseInt(mAgg[1]) }); continue; }
+      const mSpine = trimmed.match(/NODE SPINE id=(\d+)/);
+      if (mSpine) { result.nodes.spines.push({ id: parseInt(mSpine[1]) }); continue; }
+      continue;
+    }
+
+    // LINK
+    if (trimmed.startsWith('LINK ')) {
+      const mNU = trimmed.match(/LINK NIC_UPLINK nic=(\d+) leaf=(\d+)/);
+      if (mNU) { result.links.nic_uplinks.push({ nic: parseInt(mNU[1]), leaf: parseInt(mNU[2]) }); continue; }
+      const mLS = trimmed.match(/LINK LEAF_TO_SPINE leaf=(\d+) spine=(\d+)/);
+      if (mLS) { result.links.leaf_to_spine.push({ leaf: parseInt(mLS[1]), spine: parseInt(mLS[2]) }); continue; }
+      const mSL = trimmed.match(/LINK SPINE_TO_LEAF spine=(\d+) leaf=(\d+)/);
+      if (mSL) { result.links.spine_to_leaf.push({ spine: parseInt(mSL[1]), leaf: parseInt(mSL[2]) }); continue; }
+      continue;
+    }
+
+    // PACKET_ROUTE
+    if (trimmed.startsWith('PACKET_ROUTE ')) {
+      const m = trimmed.match(/PACKET_ROUTE src=(\d+) dst=(\d+)/);
+      if (m) result.packet_routes.push({ src: parseInt(m[1]), dst: parseInt(m[2]) });
+      continue;
+    }
+
+    // COMPARISON block start
+    if (trimmed.startsWith('COMPARISON ')) {
+      inComparison = true;
+      const m = trimmed.match(/COMPARISON scenario="(.+)"/);
+      result.comparison = { scenario: m ? m[1] : '', modes: [] };
+      continue;
+    }
+    if (inComparison && trimmed.startsWith('MODE ')) {
+      const m = trimmed.match(/MODE\s+(.+?)\s+wall_ms=\s*([\d.]+)\s+delivered=(\d+)\s+rate=([\d.]+)%/);
+      if (m) {
+        result.comparison.modes.push({
+          mode: m[1].trim(),
+          wall_ms: parseFloat(m[2]),
+          delivered: parseInt(m[3]),
+          rate: parseFloat(m[4]),
+        });
+      }
+      continue;
+    }
+
+    // RUN_START
+    if (trimmed.startsWith('RUN_START ')) {
+      inComparison = false;
+      const m = trimmed.match(/RUN_START mode=(.+?) ticks=(\d+)/);
+      if (m) {
+        currentRun = { mode: m[1].trim(), ticks: parseInt(m[2]), wall_ms: 0, delivered: 0, total: 0, rate: 0, stages: [] };
+        result.runs.push(currentRun);
+      }
+      continue;
+    }
+
+    // RUN_END
+    if (trimmed.startsWith('RUN_END ')) {
+      const m = trimmed.match(/RUN_END mode=(.+?) wall_ms=([\d.]+) delivered=(\d+) total=(\d+) rate=([\d.]+)%/);
+      if (m && currentRun) {
+        currentRun.wall_ms = parseFloat(m[2]);
+        currentRun.delivered = parseInt(m[3]);
+        currentRun.total = parseInt(m[4]);
+        currentRun.rate = parseFloat(m[5]);
+      }
+      currentRun = null;
+      currentStage = null;
+      continue;
+    }
+
+    if (!currentRun) continue;
+
+    // STAGE_START
+    if (trimmed.startsWith('STAGE_START ')) {
+      const m = trimmed.match(/STAGE_START stage=(\d+) name=(\S+) modules=(\d+) rel_us=([\d.]+)/);
+      if (m) {
+        currentStage = {
+          idx: parseInt(m[1]),
+          name: m[2],
+          modules: parseInt(m[3]),
+          rel_us: parseFloat(m[4]),
+          wall_us: 0,
+          events: 0,
+          threads: [],
+          emits: [],
+          delivers: [],
+        };
+        currentRun.stages.push(currentStage);
+      }
+      continue;
+    }
+
+    // STAGE_END
+    if (trimmed.startsWith('STAGE_END ')) {
+      const m = trimmed.match(/STAGE_END stage=(\d+) name=(\S+) events=(\d+) wall_us=([\d.]+)/);
+      if (m && currentStage) {
+        currentStage.events = parseInt(m[3]);
+        currentStage.wall_us = parseFloat(m[4]);
+      }
+      currentStage = null;
+      continue;
+    }
+
+    if (!currentStage) continue;
+
+    // THREAD
+    if (trimmed.startsWith('THREAD ')) {
+      const m = trimmed.match(/THREAD (\d+) modules=(.+)/);
+      if (m) currentStage.threads.push({ id: parseInt(m[1]), modules: m[2].split(',') });
+      continue;
+    }
+
+    // EMIT
+    if (trimmed.startsWith('EMIT ')) {
+      const m = trimmed.match(/EMIT module=(\S+) src=(\d+) dst=(\d+) pkt=(\d+) hop=(\d+) time_ns=([\d.]+)/);
+      if (m) currentStage.emits.push({ module: m[1], src: parseInt(m[2]), dst: parseInt(m[3]), pkt: parseInt(m[4]), hop: parseInt(m[5]), time_ns: parseFloat(m[6]) });
+      continue;
+    }
+
+    // DELIVERED
+    if (trimmed.startsWith('DELIVERED ')) {
+      const m = trimmed.match(/DELIVERED module=(\S+) src=(\d+) dst=(\d+) pkt=(\d+) hop=(\d+) time_ns=([\d.]+)/);
+      if (m) currentStage.delivers.push({ module: m[1], src: parseInt(m[2]), dst: parseInt(m[3]), pkt: parseInt(m[4]), hop: parseInt(m[5]), time_ns: parseFloat(m[6]) });
+      continue;
+    }
+  }
+
+  return result;
+}
+
+// ============================================================
+// SIM OUTPUT PARSER
+// ============================================================
+function parseSimOutput(text) {
+  const lines = text.split('\n');
+  const scenarios = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    // Look for scenario header block starting with ╔
+    if (lines[i].trimStart().startsWith('╔')) {
+      // Parse label from next line (║  Scenario X: ...)
+      let label = '';
+      let configLine = '';
+      if (i + 1 < lines.length) {
+        const m = lines[i + 1].match(/║\s+(.+)/);
+        if (m) label = m[1].trim();
+      }
+      if (i + 2 < lines.length) {
+        configLine = lines[i + 2];
+      }
+      // Parse config values: Spine=N  Leaf=N  NICs/leaf=N  TotalNICs=N  Pkts/NIC=N
+      const config = {};
+      const mSpine = configLine.match(/Spine=(\d+)/);
+      const mLeaf = configLine.match(/Leaf=(\d+)/);
+      const mNicsLeaf = configLine.match(/NICs\/leaf=(\d+)/);
+      const mTotal = configLine.match(/TotalNICs=(\d+)/);
+      const mPkts = configLine.match(/Pkts\/NIC=(\d+)/);
+      if (mSpine) config.num_spine = parseInt(mSpine[1]);
+      if (mLeaf) config.num_leaf = parseInt(mLeaf[1]);
+      if (mNicsLeaf) config.nics_per_leaf = parseInt(mNicsLeaf[1]);
+      if (mTotal) config.total_nics = parseInt(mTotal[1]);
+      if (mPkts) config.num_packets = parseInt(mPkts[1]);
+
+      // Skip past the closing ╚ line (i+3) and header/separator lines
+      i += 3;
+      // Skip past ╚ line
+      while (i < lines.length && !lines[i].trimStart().startsWith('╚')) i++;
+      i++; // skip ╚ line
+      // Skip header lines (Mode ... Wall time...) and separator dashes
+      while (i < lines.length && (lines[i].trim().startsWith('Mode') || lines[i].trim().startsWith('---'))) i++;
+
+      // Parse performance rows until separator line
+      const rawModes = [];
+      while (i < lines.length) {
+        const trimmed = lines[i].trim();
+        if (trimmed.startsWith('---')) { i++; break; }
+        if (!trimmed) { i++; continue; }
+        const mPerf = trimmed.match(/(Serial|Parallel\(\d+ threads?\))\s+([\d.]+)\s+ms\s+([\d,]+)\s+pkts\s+([\d.]+)%/);
+        if (mPerf) {
+          rawModes.push({
+            mode: mPerf[1],
+            wall_ms: parseFloat(mPerf[2]),
+            delivered: parseInt(mPerf[3].replace(/,/g, '')),
+            rate: parseFloat(mPerf[4]),
+          });
+        }
+        i++;
+      }
+
+      // Handle duplicate mode names: assign displayMode
+      const modeNameCounts = {};
+      rawModes.forEach(m => { modeNameCounts[m.mode] = (modeNameCounts[m.mode] || 0) + 1; });
+      const modeNameSeen = {};
+      const modes = rawModes.map(m => {
+        if (modeNameCounts[m.mode] > 1) {
+          modeNameSeen[m.mode] = (modeNameSeen[m.mode] || 0) + 1;
+          return { ...m, displayMode: m.mode + ' (run ' + modeNameSeen[m.mode] + ')' };
+        }
+        return { ...m, displayMode: m.mode };
+      });
+
+      // Parse correctness block
+      // Skip lines until we hit "CORRECTNESS VALIDATION"
+      const correctness = [];
+      let summaryTests = [];
+      let overallPass = true;
+
+      while (i < lines.length && !lines[i].includes('CORRECTNESS VALIDATION')) i++;
+
+      if (i < lines.length) {
+        // Skip the === line and CORRECTNESS VALIDATION line and === line
+        i++; // skip === line (already on CORRECTNESS VALIDATION line, skip it)
+        i++; // skip the === closing line
+
+        let currentMode = null;
+        let currentDisplayMode = null;
+        const corrModeNameCounts = {};
+        const corrModeNameSeen = {};
+
+        // First pass to count mode occurrences in correctness block
+        const lookAhead = [];
+        let j = i;
+        while (j < lines.length && !lines[j].includes('CORRECTNESS TEST SUMMARY')) {
+          const lm = lines[j].match(/^MODE:\s+(.+)/);
+          if (lm) corrModeNameCounts[lm[1].trim()] = (corrModeNameCounts[lm[1].trim()] || 0) + 1;
+          j++;
+        }
+
+        while (i < lines.length && !lines[i].includes('CORRECTNESS TEST SUMMARY')) {
+          const lm = lines[i].match(/^MODE:\s+(.+)/);
+          if (lm) {
+            const modeName = lm[1].trim();
+            if (corrModeNameCounts[modeName] > 1) {
+              corrModeNameSeen[modeName] = (corrModeNameSeen[modeName] || 0) + 1;
+              currentDisplayMode = modeName + ' (run ' + corrModeNameSeen[modeName] + ')';
+            } else {
+              currentDisplayMode = modeName;
+            }
+            currentMode = modeName;
+            correctness.push({ mode: currentMode, displayMode: currentDisplayMode, tests: [] });
+            i++;
+            continue;
+          }
+          const testMatch = lines[i].match(/^\s+(\S+)\s+(.*?)\s{2,}(PASS|FAIL)\s*$/);
+          if (testMatch && correctness.length > 0) {
+            correctness[correctness.length - 1].tests.push({
+              name: testMatch[1],
+              inline_summary: testMatch[2].trim(),
+              verdict: testMatch[3],
+            });
+          }
+          i++;
+        }
+
+        // Parse CORRECTNESS TEST SUMMARY block
+        if (i < lines.length && lines[i].includes('CORRECTNESS TEST SUMMARY')) {
+          i++; // skip CORRECTNESS TEST SUMMARY line
+          i++; // skip === line
+          while (i < lines.length && !lines[i].includes('OVERALL RESULT')) {
+            const sm = lines[i].match(/^TEST\s+(\S+)\s+(PASS|FAIL)/);
+            if (sm) summaryTests.push({ name: sm[1], passed: sm[2] === 'PASS' });
+            i++;
+          }
+          if (i < lines.length) {
+            const orm = lines[i].match(/OVERALL RESULT:\s*(PASS|FAIL)/);
+            if (orm) overallPass = orm[1] === 'PASS';
+          }
+        }
+      }
+
+      scenarios.push({ label, config, modes, correctness, summaryTests, overallPass });
+    } else {
+      i++;
+    }
+  }
+
+  return scenarios;
+}
+
+// ============================================================
+// APP STATE
+// ============================================================
+let allData = [];        // array of parsed trace objects
+let activeScenarioIdx = 0;
+let activeTab = 'overview';
+let chartPerf = null;
+let chartSpeedup = null;
+let chartStage = null;
+let chartOverviewPerf = null;
+let chartOverviewSpeedup = null;
+let chartOverviewStage = null;
+// Nav state
+let navRunIdx = 0;
+let navStageIdx = 0;
+// Sim output state
+let simOutputScenarios = [];
+let activeSimScenarioIdx = 0;
+let simOutputLoaded = false;
+
+const serialBaselinePlugin = {
+  id: 'serialBaseline',
+  afterDatasetsDraw(chart, args, pluginOptions) {
+    if (!pluginOptions || pluginOptions.value === null || pluginOptions.value === undefined) return;
+    const axis = pluginOptions.axis || 'y';
+    const scale = chart.scales[axis];
+    const area = chart.chartArea;
+    if (!scale || !area) return;
+
+    const pixel = scale.getPixelForValue(pluginOptions.value);
+    const color = pluginOptions.color || '#ff8c69';
+    const label = pluginOptions.label || '';
+    const ctx = chart.ctx;
+
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = pluginOptions.lineWidth || 2;
+    ctx.setLineDash(pluginOptions.dash || [7, 5]);
+    ctx.beginPath();
+    if (axis === 'x') {
+      ctx.moveTo(pixel, area.top);
+      ctx.lineTo(pixel, area.bottom);
+    } else {
+      ctx.moveTo(area.left, pixel);
+      ctx.lineTo(area.right, pixel);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    if (label) {
+      ctx.fillStyle = color;
+      ctx.font = '600 11px sans-serif';
+      if (axis === 'x') {
+        ctx.textAlign = pixel > area.left + 110 ? 'right' : 'left';
+        const textX = ctx.textAlign === 'right'
+          ? Math.min(pixel - 8, area.right - 6)
+          : Math.max(pixel + 8, area.left + 6);
+        ctx.fillText(label, textX, area.top + 14);
+      } else {
+        ctx.textAlign = 'right';
+        ctx.fillText(label, area.right - 4, Math.max(area.top + 14, pixel - 8));
+      }
+    }
+    ctx.restore();
+  }
+};
+
+if (window.Chart?.register) {
+  Chart.register(serialBaselinePlugin);
+}
+
+function renderWallTimeChart(canvasId, modeData, existingChart, opts = {}) {
+  if (existingChart) { existingChart.destroy(); existingChart = null; }
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+
+  const serial = getSerialMode(modeData);
+  const labels = modeData.map(m => opts.axisLabels ? getModeAxisLabel(m.mode) : m.displayMode);
+  const values = modeData.map(m => m.wall_ms);
+  const colors = modeData.map(m => getModeColor(m.mode) + 'cc');
+  const borderColors = modeData.map(m => getModeColor(m.mode));
+  const ctx = canvas.getContext('2d');
+
+  return new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Wall Time (ms)',
+        data: values,
+        backgroundColor: colors,
+        borderColor: borderColors,
+        borderWidth: 2,
+        borderRadius: 5,
+      }]
+    },
+    options: {
+      indexAxis: opts.indexAxis || 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        serialBaseline: serial ? {
+          axis: opts.indexAxis === 'x' ? 'y' : 'x',
+          value: serial.wall_ms,
+          label: `Serial baseline ${serial.wall_ms.toFixed(3)} ms`,
+        } : false,
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.parsed[opts.indexAxis === 'x' ? 'y' : 'x'].toFixed(3)} ms`
+          }
+        }
+      },
+      scales: opts.indexAxis === 'x' ? {
+        x: {
+          grid: { display: false },
+          ticks: { color: '#e0e0f0' }
+        },
+        y: {
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: '#8888aa' },
+          title: { display: true, text: 'Wall Time (ms)', color: '#8888aa' }
+        }
+      } : {
+        x: {
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: '#8888aa' },
+          title: { display: true, text: 'Wall Time (ms)', color: '#8888aa' }
+        },
+        y: { grid: { display: false }, ticks: { color: '#e0e0f0' } }
+      }
+    }
+  });
+}
+
+function renderSpeedupChart(canvasId, modeData, existingChart) {
+  if (existingChart) { existingChart.destroy(); existingChart = null; }
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+
+  const serial = getSerialMode(modeData);
+  const ctx = canvas.getContext('2d');
+  return new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: modeData.map(m => getModeAxisLabel(m.mode)),
+      datasets: [{
+        label: 'Speedup vs Serial',
+        data: modeData.map(m => serial ? serial.wall_ms / m.wall_ms : 1),
+        backgroundColor: modeData.map(m => getModeColor(m.mode) + 'cc'),
+        borderColor: modeData.map(m => getModeColor(m.mode)),
+        borderWidth: 2,
+        borderRadius: 5,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        serialBaseline: serial ? {
+          axis: 'y',
+          value: 1,
+          label: 'Serial baseline 1.00x',
+        } : false,
+        tooltip: {
+          callbacks: {
+            label: ctx => ` ${ctx.parsed.y.toFixed(2)}x`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: '#e0e0f0' }
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: '#8888aa' },
+          title: { display: true, text: 'Speedup vs Serial', color: '#8888aa' }
+        }
+      }
+    }
+  });
+}
+
+function renderStageTimingChart(canvasId, wrapId, d, existingChart) {
+  if (existingChart) { existingChart.destroy(); existingChart = null; }
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+
+  const stageNames = getStageNamesFromData(d);
+  const wrap = document.getElementById(wrapId);
+  if (wrap) wrap.style.height = (stageNames.length > 7 ? 420 : 320) + 'px';
+
+  const datasets = (d.runs || []).map(r => {
+    const stageMap = {};
+    (r.stages || []).forEach(s => { stageMap[s.name] = s.wall_us; });
+    return {
+      label: r.mode,
+      data: stageNames.map(name => stageMap[name] || 0),
+      backgroundColor: getModeColor(r.mode) + 'bb',
+      borderColor: getModeColor(r.mode),
+      borderWidth: 2,
+      borderRadius: 4,
+    };
+  });
+
+  const ctx = canvas.getContext('2d');
+  return new Chart(ctx, {
+    type: 'bar',
+    data: { labels: stageNames, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          labels: { color: '#e0e0f0', boxWidth: 14, font: { size: 11 } }
+        },
+        tooltip: {
+          callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)} µs` }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: '#8888aa', maxRotation: 30 }
+        },
+        y: {
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: '#8888aa' },
+          title: { display: true, text: 'wall_us', color: '#8888aa' }
+        }
+      }
+    }
+  });
+}
+
+function buildStageTimingTableHTML(d) {
+  const runs = d.runs || [];
+  const stageNames = getStageNamesFromData(d);
+  let html = '<table><thead><tr><th>Stage</th>';
+  runs.forEach(r => { html += `<th class="num">${escapeHTML(r.mode)}</th>`; });
+  html += '</tr></thead><tbody>';
+
+  stageNames.forEach((stageName, stageIdx) => {
+    html += `<tr><td><span class="stage-dot" style="background:${STAGE_COLORS[stageIdx]}"></span>${escapeHTML(stageName)}</td>`;
+    runs.forEach(r => {
+      const stage = r.stages.find(s => s.name === stageName);
+      html += `<td class="num">${stage ? stage.wall_us.toFixed(1) + ' µs' : '—'}</td>`;
+    });
+    html += '</tr>';
+  });
+
+  html += '<tr style="border-top:2px solid var(--border);font-weight:700"><td>TOTAL</td>';
+  runs.forEach(r => {
+    const total = r.stages.reduce((acc, stage) => acc + stage.wall_us, 0);
+    html += `<td class="num">${total.toFixed(1)} µs</td>`;
+  });
+  html += '</tr></tbody></table>';
+  return html;
+}
+
+function switchTab(tabName) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  const targetBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+  if (targetBtn) targetBtn.classList.add('active');
+  activeTab = tabName;
+
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    panel.classList.remove('active');
+    panel.style.display = 'none';
+  });
+
+  const panel = document.getElementById('tab-' + activeTab);
+  if (panel) {
+    panel.classList.add('active');
+    panel.style.display = 'block';
+  }
+
+  if (allData.length || simOutputLoaded || activeTab === 'cfg') renderActiveScenario();
+}
+
+// ============================================================
+// FILE LOADING
+// ============================================================
+document.getElementById('file-input').addEventListener('change', function(e) {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+  document.getElementById('load-status').textContent = `Loading ${files.length} file(s)...`;
+
+  let loaded = 0;
+  allData = [];
+  simOutputScenarios = [];
+  simOutputLoaded = false;
+  activeScenarioIdx = 0;
+  activeSimScenarioIdx = 0;
+
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+      const text = ev.target.result;
+      // Detect file type: if it contains ╔ at start of a line, it's a sim_output file
+      const isSimOutput = /^\s*╔/m.test(text);
+      if (isSimOutput) {
+        const parsed = parseSimOutput(text);
+        simOutputScenarios = parsed;
+        simOutputLoaded = true;
+      } else {
+        const data = parseTrace(text);
+        data._filename = file.name;
+        allData.push(data);
+      }
+      loaded++;
+      if (loaded === files.length) {
+        // Sort trace data by filename
+        allData.sort((a, b) => a._filename.localeCompare(b._filename));
+        const traceCount = allData.length;
+        const simCount = simOutputLoaded ? simOutputScenarios.length : 0;
+        document.getElementById('load-status').textContent =
+          `${files.length} file(s) loaded` +
+          (simOutputLoaded ? ` (sim_output: ${simCount} scenarios)` : '') +
+          (traceCount ? ` (traces: ${traceCount})` : '');
+        renderAll();
+        if (traceCount) switchTab('overview');
+        else if (simOutputLoaded) switchTab('corr');
+      }
+    };
+    reader.readAsText(file);
+  });
+});
+
+// ============================================================
+// RENDER ORCHESTRATION
+// ============================================================
+function renderAll() {
+  if (!allData.length && !simOutputLoaded) return;
+
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('scenario-bar').style.display = 'flex';
+  document.getElementById('tabs-bar').style.display = 'flex';
+
+  renderScenarioTabs();
+  renderActiveScenario();
+}
+
+function renderScenarioTabs() {
+  const bar = document.getElementById('scenario-bar');
+  bar.innerHTML = '';
+
+  // Use trace files if available, otherwise use sim_output scenario labels
+  const tabItems = allData.length
+    ? allData.map(d => d.scenario || d._filename)
+    : simOutputScenarios.map(s => s.label);
+
+  tabItems.forEach((label, i) => {
+    const btn = document.createElement('div');
+    btn.className = 'scenario-tab' + (i === activeScenarioIdx ? ' active' : '');
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      activeScenarioIdx = i;
+      // also sync sim scenario index if possible
+      if (!allData.length && simOutputLoaded) activeSimScenarioIdx = i;
+      document.querySelectorAll('.scenario-tab').forEach((el, j) => el.classList.toggle('active', j === i));
+      renderActiveScenario();
+    });
+    bar.appendChild(btn);
+  });
+}
+
+function renderActiveScenario() {
+  const d = allData[activeScenarioIdx];
+
+  if (d) {
+    // Check for packet flow data
+    const hasVerbose = d.runs.some(r => r.stages.some(s => s.emits.length > 0 || s.delivers.length > 0));
+    document.getElementById('tab-pf-btn').style.display = hasVerbose ? '' : 'none';
+  } else {
+    document.getElementById('tab-pf-btn').style.display = 'none';
+  }
+
+  switch (activeTab) {
+    case 'overview':
+      if (d) renderOverview(d);
+      else {
+        const panel = document.getElementById('tab-overview');
+        panel.style.display = 'block';
+        panel.classList.add('active');
+        panel.innerHTML = '<div class="card"><div class="section-head"><div><h2>Overview</h2><p>Trace files are needed for the experiment summary and topology snapshot.</p></div></div><p style="color:var(--text-muted)">Load a trace or run a new simulation to populate the overview. Correctness results are still available in the Correctness tab if you only loaded <code>sim_output.txt</code>.</p></div>';
+      }
+      break;
+    case 'perf':  if (d) renderPerf(d); break;
+    case 'stage': if (d) renderStage(d); break;
+    case 'nav':   if (d) renderNav(d); break;
+    case 'pf':    if (d) renderPacketFlow(d); break;
+    case 'corr':  renderCorrectness(); break;
+    case 'cfg':   renderConfigure(); break;
+  }
+}
+
+// ============================================================
+// TAB SWITCHING
+// ============================================================
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+});
+
+// Panels stay hidden until a tab is activated explicitly.
+document.getElementById('tab-overview').style.display = 'none';
+document.getElementById('tab-perf').style.display = 'none';
+
+// ============================================================
+// TAB 1: OVERVIEW
+// ============================================================
+function renderOverview(d) {
+  const panel = document.getElementById('tab-overview');
+  panel.style.display = 'block';
+  panel.classList.add('active');
+
+  const modeData = getModeData(d);
+  const uniqueModes = getUniqueModes(modeData);
+  const tier = parseInt(d.config.num_tiers) === 3 || (d.nodes.aggs && d.nodes.aggs.length > 0) ? 3 : 2;
+  const numCore = parseInt(d.config.num_spine) || d.nodes.spines.length || 0;
+  const numAgg = parseInt(d.config.num_agg) || d.nodes.aggs.length || 0;
+  const numTor = parseInt(d.config.num_leaf) || d.nodes.leaves.length || 0;
+  const nicsPerTor = parseInt(d.config.nics_per_leaf) || 0;
+  const totalNICs = parseInt(d.config.total_nics) || d.nodes.nics.length || 0;
+  const expectedPackets = getExpectedPacketCount(d.config);
+  const routingRule = getRoutingDescription(d);
+  const correctnessInfo = getActiveCorrectnessScenario(d);
+  const correctnessScenario = correctnessInfo.scenario;
+  const hasVerbose = d.runs.some(r => r.stages.some(s => s.emits.length > 0 || s.delivers.length > 0));
+
+  panel.innerHTML = `
+    <div class="card">
+      <div class="section-head">
+        <div>
+          <h2>What Experiment Did We Run?</h2>
+          <p>The first panel should let someone understand the network, the traffic, and the compared execution modes in a few seconds.</p>
+        </div>
+      </div>
+      <div class="summary-grid">
+        <div>
+          <h3>${escapeHTML(d.scenario || 'Scenario')}</h3>
+          <div class="summary-list">
+            <div class="summary-item">
+              <div class="label">Topology</div>
+              <div class="value">${tier === 3 ? `3-tier · Core ${numCore} · Agg ${numAgg} · ToR ${numTor}` : `2-tier · Spine ${numCore} · Leaf ${numTor}`}</div>
+            </div>
+            <div class="summary-item">
+              <div class="label">Edge Fanout</div>
+              <div class="value">${nicsPerTor.toLocaleString()} NICs per ${tier === 3 ? 'ToR' : 'leaf'} · ${totalNICs.toLocaleString()} total NICs</div>
+            </div>
+            <div class="summary-item">
+              <div class="label">Traffic Load</div>
+              <div class="value">${(parseInt(d.config.num_packets) || 0).toLocaleString()} packets per NIC · ${expectedPackets.toLocaleString()} total packets</div>
+            </div>
+            <div class="summary-item">
+              <div class="label">Timing Model</div>
+              <div class="value">${(parseFloat(d.config.nic_interval_ns) || 0).toFixed(1)} ns injection interval · ${(parseFloat(d.config.link_delay_ns) || 0).toFixed(1)} ns link delay</div>
+            </div>
+            <div class="summary-item">
+              <div class="label">Routing Rule</div>
+              <div class="value">${escapeHTML(routingRule)}</div>
+            </div>
+            <div class="summary-item">
+              <div class="label">Correctness Status</div>
+              <div class="value">${correctnessScenario ? `<span class="status-badge ${correctnessScenario.overallPass ? 'good' : 'bad'}">${correctnessScenario.overallPass ? 'PASS' : 'FAIL'}</span>` : '<span class="status-badge warn">No sim_output loaded</span>'}</div>
+            </div>
+          </div>
+          <div class="chip-row">
+            ${uniqueModes.map(m => modeBadge(m.mode)).join('')}
+          </div>
+          <div class="sentence-card">${escapeHTML(buildExperimentSentence(d, modeData))}</div>
+        </div>
+        <div class="topology-mini-wrap">
+          <h3>Topology Snapshot</h3>
+          ${renderScenarioMiniTopology(d)}
+          <div class="topology-mini-caption">This compact schematic shows one example packet route through the topology. Use the Step Navigator for the full stage-by-stage view.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-head">
+        <div>
+          <h2>Was Parallelization Faster?</h2>
+          <p>Wall time answers the direct performance question, speedup shows whether extra threads helped, and stage timing shows where runtime was spent. Overall wall time is benchmarked after a warm-up pass, while stage timing still comes from the traced validation run used for correctness and explanation.</p>
+        </div>
+      </div>
+      <div class="metric-grid">${buildPerfMetricCards(d, modeData)}</div>
+      <div class="chart-grid-2">
+        <div class="metric-card">
+          <h3>Wall Time by Mode</h3>
+          <div class="chart-wrap" style="height:280px"><canvas id="chart-overview-perf"></canvas></div>
+        </div>
+        <div class="metric-card">
+          <h3>Speedup vs Serial</h3>
+          <div class="chart-wrap" style="height:280px"><canvas id="chart-overview-speedup"></canvas></div>
+        </div>
+      </div>
+      <div class="metric-card" style="margin-top:16px">
+        <h3>Stage Breakdown</h3>
+        <div class="chart-wrap" id="overview-stage-wrap" style="height:320px"><canvas id="chart-overview-stage"></canvas></div>
+        <div class="chart-note">Grouped stage timing makes it easier to see whether runtime is dominated by packet generation, link traversal, forwarding, or egress behavior.</div>
+      </div>
+      <div class="metric-card" style="margin-top:16px">
+        <h3>Mode Comparison Table</h3>
+        <div id="overview-mode-table-wrap"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="section-head">
+        <div>
+          <h2>Did Parallelization Preserve Correctness?</h2>
+          <p>The scoreboard stays close to performance so the page answers both “Was it faster?” and “Was it still correct?” before any deeper drill-down.</p>
+        </div>
+      </div>
+      ${correctnessScenario ? `
+        ${buildCorrectnessMatrixHTML(correctnessScenario)}
+        <div class="${correctnessScenario.overallPass ? 'overall-pass' : 'overall-fail'}">${correctnessScenario.overallPass ? '&#10003;' : '&#10007;'} OVERALL CORRECTNESS: ${correctnessScenario.overallPass ? 'PASS' : 'FAIL'}</div>
+        <div class="metric-card" style="margin-top:16px">
+          <h3>${correctnessScenario.overallPass ? 'Failure Drill-down' : 'Failure Details'}</h3>
+          ${buildFailureDetailsHTML(correctnessScenario)}
+        </div>
+      ` : `
+        <div class="metric-card">
+          <p style="color:var(--text-muted)">Load or generate <code>sim_output.txt</code> to populate the correctness matrix and overall verdict for this scenario.</p>
+        </div>
+      `}
+    </div>
+
+    <div class="card">
+      <div class="section-head">
+        <div>
+          <h2>Explainability And Debugging</h2>
+          <p>The detailed views still matter, but now they sit after the headline results as teaching and debugging tools instead of being the only way to understand the run.</p>
+        </div>
+      </div>
+      <div class="insight-list">
+        <div class="insight-card">
+          <h3>Step Navigator</h3>
+          <p>Walk one mode through every stage and watch the topology highlight the active part of the network.</p>
+          <button class="jump-tab-btn" data-jump-tab="nav">Open Step Navigator</button>
+        </div>
+        <div class="insight-card">
+          <h3>Stage Breakdown</h3>
+          <p>Use the full stage timing tab when you want the grouped chart and per-stage table without the rest of the dashboard around it.</p>
+          <button class="jump-tab-btn secondary" data-jump-tab="stage">Open Stage Breakdown</button>
+        </div>
+        <div class="insight-card">
+          <h3>Packet Flow</h3>
+          <p>${hasVerbose ? 'Inspect packet emit, delivery, and latency records for one source NIC at a time.' : 'Packet flow drill-down needs a verbose trace. Enable verbose trace in Configure & Run for packet-level timing tables.'}</p>
+          ${hasVerbose ? '<button class="jump-tab-btn secondary" data-jump-tab="pf">Open Packet Flow</button>' : ''}
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('overview-mode-table-wrap').innerHTML = buildModeComparisonTableHTML(modeData, expectedPackets);
+  chartOverviewPerf = renderWallTimeChart('chart-overview-perf', modeData, chartOverviewPerf);
+  chartOverviewSpeedup = renderSpeedupChart('chart-overview-speedup', modeData, chartOverviewSpeedup);
+  chartOverviewStage = renderStageTimingChart('chart-overview-stage', 'overview-stage-wrap', d, chartOverviewStage);
+  attachJumpTabButtons(panel);
+}
+
+// ============================================================
+// TAB 2: PERFORMANCE
+// ============================================================
+function renderPerf(d) {
+  const panel = document.getElementById('tab-perf');
+  panel.style.display = 'block';
+  panel.classList.add('active');
+
+  const modeData = getModeData(d);
+  const expectedPackets = getExpectedPacketCount(d.config);
+
+  document.getElementById('perf-summary-grid').innerHTML = buildPerfMetricCards(d, modeData);
+  document.getElementById('perf-table-wrap').innerHTML = buildModeComparisonTableHTML(modeData, expectedPackets);
+
+  chartPerf = renderWallTimeChart('chart-perf', modeData, chartPerf);
+  chartSpeedup = renderSpeedupChart('chart-speedup', modeData, chartSpeedup);
+
+  let delivHTML = '<table><thead><tr><th>Mode</th><th class="num">Delivered</th><th class="num">Total</th><th class="num">Rate</th></tr></thead><tbody>';
+  modeData.forEach(m => {
+    const rateCls = m.rate >= 100 ? 'good' : m.rate >= 95 ? 'warn' : 'bad';
+    delivHTML += `<tr>
+      <td>${modeBadge(m.mode)}</td>
+      <td class="num">${m.delivered.toLocaleString()}</td>
+      <td class="num">${expectedPackets ? expectedPackets.toLocaleString() : m.delivered.toLocaleString()}</td>
+      <td class="num ${rateCls}">${m.rate.toFixed(1)}%</td>
+    </tr>`;
+  });
+  delivHTML += '</tbody></table>';
+  document.getElementById('delivery-stats-wrap').innerHTML = delivHTML;
+}
+
+// ============================================================
+// TAB 2: STAGE BREAKDOWN
+// ============================================================
+function renderStage(d) {
+  const panel = document.getElementById('tab-stage');
+  panel.style.display = 'block';
+  panel.classList.add('active');
+
+  if (!(d.runs || []).length) return;
+  chartStage = renderStageTimingChart('chart-stage', 'chart-stage-wrap', d, chartStage);
+  document.getElementById('stage-table-wrap').innerHTML = buildStageTimingTableHTML(d);
+}
+
+// ============================================================
+// TAB 3: STEP NAVIGATOR
+// ============================================================
+function renderNav(d) {
+  const panel = document.getElementById('tab-nav');
+  panel.style.display = 'block';
+  panel.classList.add('active');
+
+  const runs = d.runs;
+  if (!runs.length) return;
+
+  // Populate mode select
+  const sel = document.getElementById('nav-mode-select');
+  sel.innerHTML = '';
+  runs.forEach((r, i) => {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.textContent = r.mode;
+    sel.appendChild(opt);
+  });
+
+  navRunIdx = 0;
+  navStageIdx = 0;
+
+  sel.value = navRunIdx;
+  sel.onchange = () => {
+    navRunIdx = parseInt(sel.value);
+    navStageIdx = 0;
+    updateNavView(d);
+  };
+
+  document.getElementById('nav-prev').onclick = () => {
+    if (navStageIdx > 0) { navStageIdx--; updateNavView(d); }
+  };
+  document.getElementById('nav-next').onclick = () => {
+    const run = runs[navRunIdx];
+    if (navStageIdx < run.stages.length - 1) { navStageIdx++; updateNavView(d); }
+  };
+
+  updateNavView(d);
+}
+
+function updateNavView(d) {
+  const runs = d.runs;
+  const run = runs[navRunIdx];
+  if (!run) return;
+
+  const stage = run.stages[navStageIdx];
+  document.getElementById('nav-prev').disabled = navStageIdx <= 0;
+  document.getElementById('nav-next').disabled = navStageIdx >= run.stages.length - 1;
+  document.getElementById('nav-stage-label').textContent = `Stage ${navStageIdx + 1} / ${run.stages.length}`;
+
+  renderPips(run.stages, navStageIdx);
+  renderTopology(d, navStageIdx);
+  renderStageDetail(run, stage);
+}
+
+function renderPips(stages, activeIdx) {
+  const container = document.getElementById('pips');
+  container.innerHTML = '';
+  stages.forEach((s, i) => {
+    const pip = document.createElement('div');
+    pip.className = 'pip' + (i === activeIdx ? ' active' : '');
+    pip.style.background = STAGE_COLORS[s.idx] || '#555';
+    pip.style.color = '#fff';
+    pip.textContent = s.name.replace(/_/g, ' ');
+    pip.title = `Stage ${s.idx}: ${s.name}`;
+    pip.addEventListener('click', () => { navStageIdx = i; updateNavView(allData[activeScenarioIdx]); });
+    container.appendChild(pip);
+  });
+}
+
+function renderTopology(d, activeStageIdx) {
+  const svg = document.getElementById('topo-svg');
+  const W = 700;
+  const config = d.config;
+  const nodes = d.nodes;
+
+  // Dispatch to 3-tier renderer when applicable
+  if (parseInt(config.num_tiers) === 3 || (nodes.aggs && nodes.aggs.length > 0)) {
+    renderTopology3tier(d, activeStageIdx, svg, W);
+    return;
+  }
+
+  const H = 320;
+  const numSpine = nodes.spines.length || parseInt(config.num_spine) || 4;
+  const numLeaf = nodes.leaves.length || parseInt(config.num_leaf) || 4;
+  const numNICs = nodes.nics.length || parseInt(config.total_nics) || 16;
+  const nicsPerLeaf = parseInt(config.nics_per_leaf) || Math.ceil(numNICs / numLeaf);
+  const showNICs = numNICs <= 64;
+
+  const SPINE_Y = 50;
+  const LEAF_Y = 150;
+  const NIC_Y = 260;
+  const RW = 54, RH = 28; // rect width/height for switches
+
+  // Compute x positions
+  function xPos(count, idx, W) {
+    const pad = 60;
+    const span = W - 2 * pad;
+    return pad + (count <= 1 ? span / 2 : (idx / (count - 1)) * span);
+  }
+
+  const spineX = Array.from({length: numSpine}, (_, i) => xPos(numSpine, i, W));
+  const leafX = Array.from({length: numLeaf}, (_, i) => xPos(numLeaf, i, W));
+
+  // NIC x positions: grouped by leaf
+  let nicX = [];
+  if (showNICs) {
+    for (let li = 0; li < numLeaf; li++) {
+      const lx = leafX[li];
+      for (let ni = 0; ni < nicsPerLeaf; ni++) {
+        const offset = (ni - (nicsPerLeaf - 1) / 2) * 18;
+        nicX.push(lx + offset);
+      }
+    }
+  }
+
+  // Determine what to highlight based on active stage
+  const stageHighlight = activeStageIdx; // 0-6
+
+  const svgViewH = showNICs ? 320 : 230;
+  svg.setAttribute('viewBox', `0 0 ${W} ${svgViewH}`);
+  svg.style.minHeight = '200px';
+
+  let html = '';
+
+  // ---- LINKS ----
+
+  // Helper: link style
+  function linkStyle(active, color, dashed) {
+    const c = active ? color : '#2a2a4a';
+    const w = active ? 2.5 : 1;
+    const opacity = active ? 1 : 0.3;
+    const dash = dashed ? 'stroke-dasharray="6,3"' : '';
+    return `stroke="${c}" stroke-width="${w}" opacity="${opacity}" ${dash}`;
+  }
+
+  // Spine-to-Leaf links (bidirectional; highlight upward on stage 3, downward on stage 5)
+  d.links.leaf_to_spine.forEach(lk => {
+    const lx = leafX[lk.leaf];
+    const sx = spineX[lk.spine];
+    const isUp = stageHighlight === 3;
+    const isDown = stageHighlight === 5;
+    const isActive = isUp || isDown;
+    const col = isUp ? '#2ecc71' : '#3498db';
+    const markerEnd = isActive ? `marker-end="url(#arrow-${isUp ? 'up' : 'dn'})"` : '';
+    html += `<line x1="${lx}" y1="${LEAF_Y - RH/2}" x2="${sx}" y2="${SPINE_Y + RH/2}" ${linkStyle(isActive, col, false)} ${markerEnd}/>`;
+  });
+
+  // NIC-to-Leaf links (highlight stage 1)
+  if (showNICs) {
+    nodes.nics.forEach((nic, i) => {
+      const nx = nicX[i] || leafX[nic.leaf];
+      const lx = leafX[nic.leaf];
+      const isActive = stageHighlight === 1;
+      html += `<line x1="${nx}" y1="${NIC_Y - 10}" x2="${lx}" y2="${LEAF_Y + RH/2}" ${linkStyle(isActive, '#e67e22', false)}/>`;
+    });
+  }
+
+  // ---- ARROWHEAD defs ----
+  // Stage indicator bar
+  const stageName2 = STAGE_NAMES[activeStageIdx] || `STAGE_${activeStageIdx}`;
+  const stageCol2  = STAGE_COLORS[activeStageIdx] || '#888';
+  const stageBar   = `<rect x="0" y="0" width="${W}" height="26" fill="${stageCol2}" opacity="0.18"/>`
+    + `<text x="${W/2}" y="17" text-anchor="middle" font-size="11" fill="${stageCol2}" font-weight="700">Stage ${activeStageIdx}: ${stageName2}</text>`;
+
+  html = `<defs>
+    <marker id="arrow-up" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#2ecc71"/>
+    </marker>
+    <marker id="arrow-dn" markerWidth="8" markerHeight="8" refX="2" refY="3" orient="auto">
+      <path d="M8,0 L8,6 L0,3 z" fill="#3498db"/>
+    </marker>
+  </defs>` + stageBar + html;
+
+  // ---- SPINE NODES ----
+  nodes.spines.forEach((sp, i) => {
+    const cx = spineX[i], cy = SPINE_Y;
+    const isActive = stageHighlight === 4;
+    const fill = isActive ? '#1abc9c' : '#1a1a2e';
+    const stroke = isActive ? '#1abc9c' : '#2a2a4a';
+    const glow = isActive ? `filter="url(#glow)"` : '';
+    html += `<rect x="${cx - RW/2}" y="${cy - RH/2}" width="${RW}" height="${RH}" rx="5" fill="${fill}" stroke="${stroke}" stroke-width="${isActive ? 2 : 1}" ${glow}/>`;
+    html += `<text x="${cx}" y="${cy + 5}" text-anchor="middle" font-size="10" fill="${isActive ? '#fff' : '#8888aa'}">S${sp.id}</text>`;
+  });
+
+  // ---- LEAF NODES ----
+  nodes.leaves.forEach((lf, i) => {
+    const cx = leafX[i], cy = LEAF_Y;
+    const isActive = stageHighlight === 2 || stageHighlight === 6;
+    const fill = isActive ? '#f1c40f' : '#1a1a2e';
+    const stroke = isActive ? '#f1c40f' : '#2a2a4a';
+    html += `<rect x="${cx - RW/2}" y="${cy - RH/2}" width="${RW}" height="${RH}" rx="5" fill="${fill}" stroke="${stroke}" stroke-width="${isActive ? 2 : 1}"/>`;
+    html += `<text x="${cx}" y="${cy + 5}" text-anchor="middle" font-size="10" fill="${isActive ? '#111' : '#8888aa'}">L${lf.id}</text>`;
+  });
+
+  // ---- NIC NODES ----
+  if (showNICs) {
+    nodes.nics.forEach((nic, i) => {
+      const cx = nicX[i] || leafX[nic.leaf];
+      const cy = NIC_Y;
+      const isActive = stageHighlight === 0 || stageHighlight === 6;
+      const fill = isActive ? '#e74c3c' : '#1a1a2e';
+      const stroke = isActive ? '#e74c3c' : '#2a2a4a';
+      const r = 9;
+      html += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="${isActive ? 2 : 1}"/>`;
+      if (nodes.nics.length <= 32) {
+        html += `<text x="${cx}" y="${cy + 4}" text-anchor="middle" font-size="7" fill="${isActive ? '#fff' : '#555'}">${nic.id}</text>`;
+      }
+    });
+  }
+
+  // ---- LEGEND ----
+  const legendY = svgViewH - 20;
+  // Labels match kStageNames[] (2-tier uses positions 0-6 of the shared array)
+  const stages_shown = [
+    {s:0, label:'NICs',        col:'#e74c3c'},
+    {s:1, label:'NIC→ToR',    col:'#e67e22'},
+    {s:2, label:'ToR Fwd',    col:'#f1c40f'},
+    {s:3, label:'ToR→Spine↑', col:'#2ecc71'},
+    {s:4, label:'Spine Fwd',  col:'#1abc9c'},
+    {s:5, label:'Spine→ToR↓', col:'#3498db'},
+    {s:6, label:'Delivery',   col:'#9b59b6'},
+  ];
+  let lx = 10;
+  stages_shown.forEach(item => {
+    const isActive = item.s === activeStageIdx;
+    const opacity = isActive ? 1 : 0.35;
+    html += `<circle cx="${lx + 6}" cy="${legendY}" r="5" fill="${item.col}" opacity="${opacity}"/>`;
+    html += `<text x="${lx + 15}" y="${legendY + 4}" font-size="9" fill="${item.col}" opacity="${opacity}">${item.label}</text>`;
+    lx += item.label.length * 6 + 20;
+  });
+
+  svg.innerHTML = html;
+}
+
+// ─── 3-Tier topology renderer ───────────────────────────────
+function renderTopology3tier(d, activeStageIdx, svg, W) {
+  const config = d.config;
+  const nodes  = d.nodes;
+  const si     = activeStageIdx; // 0-10
+
+  const numCore = nodes.spines.length || parseInt(config.num_spine) || 4;
+  const numAgg  = (nodes.aggs && nodes.aggs.length) || parseInt(config.num_agg) || 4;
+  const numToR  = nodes.leaves.length || parseInt(config.num_leaf) || 4;
+  const numNICs = nodes.nics.length   || parseInt(config.total_nics) || 16;
+  const nicsPerToR = parseInt(config.nics_per_leaf) || Math.ceil(numNICs / numToR);
+  const showNICs = numNICs <= 64;
+
+  const svgH = showNICs ? 420 : 290;
+  svg.setAttribute('viewBox', `0 0 ${W} ${svgH}`);
+  svg.style.minHeight = '280px';
+
+  const CORE_Y = 65, AGG_Y = 150, TOR_Y = 240, NIC_Y = 360;
+  const RW = 48, RH = 26;
+
+  function xPos(count, idx) {
+    const pad = 60, span = W - 2 * pad;
+    return pad + (count <= 1 ? span / 2 : (idx / (count - 1)) * span);
+  }
+
+  const coreX = Array.from({length: numCore}, (_, i) => xPos(numCore, i));
+  const aggX  = Array.from({length: numAgg},  (_, i) => xPos(numAgg, i));
+  const torX  = Array.from({length: numToR},  (_, i) => xPos(numToR, i));
+
+  let nicX = [];
+  if (showNICs) {
+    for (let ti = 0; ti < numToR; ti++) {
+      const tx = torX[ti];
+      for (let ni = 0; ni < nicsPerToR; ni++) {
+        nicX.push(tx + (ni - (nicsPerToR - 1) / 2) * 18);
+      }
+    }
+  }
+
+  function ls(active, color) {
+    return `stroke="${active ? color : '#2a2a4a'}" stroke-width="${active ? 2.5 : 1}" opacity="${active ? 0.9 : 0.2}"`;
+  }
+
+  let html = `<defs>
+    <marker id="arrow-up" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="#2ecc71"/></marker>
+    <marker id="arrow-dn" markerWidth="8" markerHeight="8" refX="2" refY="3" orient="auto"><path d="M8,0 L8,6 L0,3 z" fill="#3498db"/></marker>
+  </defs>`;
+
+  // Stage indicator bar — always visible, changes color+text on every stage
+  const stageName3 = STAGE_NAMES[si] || `STAGE_${si}`;
+  const stageCol3  = STAGE_COLORS[si] || '#888';
+  html += `<rect x="0" y="0" width="${W}" height="26" fill="${stageCol3}" opacity="0.18"/>`;
+  html += `<text x="${W/2}" y="17" text-anchor="middle" font-size="11" fill="${stageCol3}" font-weight="700">Stage ${si}: ${stageName3}</text>`;
+
+  // Core–Agg links (inferred full-mesh)
+  const coreAggUp   = si === 5; // AGG_TO_CORE
+  const coreAggDown = si === 7; // CORE_EGRESS
+  for (let ci = 0; ci < numCore; ci++) {
+    for (let ai = 0; ai < numAgg; ai++) {
+      const act = coreAggUp || coreAggDown;
+      const col = coreAggUp ? '#1abc9c' : '#e91e63';
+      html += `<line x1="${aggX[ai]}" y1="${AGG_Y - RH/2}" x2="${coreX[ci]}" y2="${CORE_Y + RH/2}" ${ls(act, col)}/>`;
+    }
+  }
+
+  // Agg–ToR links (always inferred full-mesh: log_topology writes LEAF_TO_SPINE
+  // with spine=Core index not Agg index, so we can't rely on that data for 3-tier)
+  const aggTorUp   = si === 3; // TOR_TO_AGG
+  const aggTorDown = si === 9; // AGG_TO_TOR
+  for (let ti = 0; ti < numToR; ti++) {
+    for (let ai = 0; ai < numAgg; ai++) {
+      const act = aggTorUp || aggTorDown;
+      const col = aggTorUp ? '#2ecc71' : '#3498db';
+      html += `<line x1="${torX[ti]}" y1="${TOR_Y - RH/2}" x2="${aggX[ai]}" y2="${AGG_Y + RH/2}" ${ls(act, col)}/>`;
+    }
+  }
+
+  // NIC–ToR links
+  if (showNICs) {
+    nodes.nics.forEach((nic, i) => {
+      const nx = nicX[i] !== undefined ? nicX[i] : torX[Math.min(nic.leaf, numToR - 1)];
+      const tx = torX[Math.min(nic.leaf, numToR - 1)];
+      html += `<line x1="${nx}" y1="${NIC_Y - 10}" x2="${tx}" y2="${TOR_Y + RH/2}" ${ls(si === 1, '#e67e22')}/>`;
+    });
+  }
+
+  // Core nodes
+  const coreAct = si === 6; // CORE_FWD
+  for (let i = 0; i < numCore; i++) {
+    const cx = coreX[i], fill = coreAct ? '#1abc9c' : '#1a1a2e', stroke = coreAct ? '#1abc9c' : '#2a2a4a';
+    html += `<rect x="${cx - RW/2}" y="${CORE_Y - RH/2}" width="${RW}" height="${RH}" rx="5" fill="${fill}" stroke="${stroke}" stroke-width="${coreAct ? 2 : 1}"/>`;
+    html += `<text x="${cx}" y="${CORE_Y + 5}" text-anchor="middle" font-size="10" fill="${coreAct ? '#fff' : '#8888aa'}">C${i}</text>`;
+  }
+
+  // Agg nodes
+  const aggAct = si === 4 || si === 8; // AGG_FWD_UP or AGG_FWD_DOWN
+  for (let i = 0; i < numAgg; i++) {
+    const cx = aggX[i], fill = aggAct ? '#9b59b6' : '#1a1a2e', stroke = aggAct ? '#9b59b6' : '#2a2a4a';
+    html += `<rect x="${cx - RW/2}" y="${AGG_Y - RH/2}" width="${RW}" height="${RH}" rx="5" fill="${fill}" stroke="${stroke}" stroke-width="${aggAct ? 2 : 1}"/>`;
+    html += `<text x="${cx}" y="${AGG_Y + 5}" text-anchor="middle" font-size="10" fill="${aggAct ? '#fff' : '#8888aa'}">A${i}</text>`;
+  }
+
+  // ToR nodes
+  const torAct = si === 2 || si === 10; // TOR_FWD or TOR_EGRESS
+  for (let i = 0; i < numToR; i++) {
+    const cx = torX[i], fill = torAct ? '#f1c40f' : '#1a1a2e', stroke = torAct ? '#f1c40f' : '#2a2a4a';
+    html += `<rect x="${cx - RW/2}" y="${TOR_Y - RH/2}" width="${RW}" height="${RH}" rx="5" fill="${fill}" stroke="${stroke}" stroke-width="${torAct ? 2 : 1}"/>`;
+    html += `<text x="${cx}" y="${TOR_Y + 5}" text-anchor="middle" font-size="10" fill="${torAct ? '#111' : '#8888aa'}">T${i}</text>`;
+  }
+
+  // NIC nodes
+  if (showNICs) {
+    const nicAct = si === 0 || si === 10;
+    nodes.nics.forEach((nic, i) => {
+      const cx = nicX[i] !== undefined ? nicX[i] : torX[Math.min(nic.leaf, numToR - 1)];
+      const fill = nicAct ? '#e74c3c' : '#1a1a2e', stroke = nicAct ? '#e74c3c' : '#2a2a4a';
+      html += `<circle cx="${cx}" cy="${NIC_Y}" r="9" fill="${fill}" stroke="${stroke}" stroke-width="${nicAct ? 2 : 1}"/>`;
+      if (nodes.nics.length <= 32) {
+        html += `<text x="${cx}" y="${NIC_Y + 4}" text-anchor="middle" font-size="7" fill="${nicAct ? '#fff' : '#555'}">${nic.id}</text>`;
+      }
+    });
+  }
+
+  // Labels
+  const labelX = 6;
+  [{y:CORE_Y,txt:'Core'},{y:AGG_Y,txt:'Agg'},{y:TOR_Y,txt:'ToR'}].forEach(({y,txt}) => {
+    html += `<text x="${labelX}" y="${y + 5}" font-size="9" fill="#8888aa" font-weight="600">${txt}</text>`;
+  });
+  if (showNICs) html += `<text x="${labelX}" y="${NIC_Y + 5}" font-size="9" fill="#8888aa" font-weight="600">NIC</text>`;
+
+  // Legend
+  const legendY = svgH - 18;
+  const stages3 = [
+    {s:0,label:'NICs',col:'#e74c3c'},{s:1,label:'NIC→ToR',col:'#e67e22'},
+    {s:2,label:'ToR Fwd',col:'#f1c40f'},{s:3,label:'ToR→Agg↑',col:'#2ecc71'},
+    {s:4,label:'Agg Fwd↑',col:'#9b59b6'},{s:5,label:'Agg→Core↑',col:'#1abc9c'},
+    {s:6,label:'Core Fwd',col:'#00bcd4'},{s:7,label:'Core→Agg↓',col:'#e91e63'},
+    {s:8,label:'Agg Fwd↓',col:'#9b59b6'},{s:9,label:'Agg→ToR↓',col:'#3498db'},
+    {s:10,label:'Delivery',col:'#8bc34a'},
+  ];
+  let lx = 10;
+  stages3.forEach(item => {
+    const isAct = item.s === si, op = isAct ? 1 : 0.3;
+    html += `<circle cx="${lx + 5}" cy="${legendY}" r="4" fill="${item.col}" opacity="${op}"/>`;
+    html += `<text x="${lx + 12}" y="${legendY + 4}" font-size="8" fill="${item.col}" opacity="${op}">${item.label}</text>`;
+    lx += item.label.length * 5.2 + 14;
+  });
+
+  svg.innerHTML = html;
+}
+
+function renderStageDetail(run, stage) {
+  const el = document.getElementById('stage-detail');
+  if (!stage) { el.innerHTML = '<p style="color:var(--text-muted)">No stage data.</p>'; return; }
+
+  const stageColor = STAGE_COLORS[stage.idx] || '#888';
+  let html = `<h3 style="color:${stageColor}">Stage ${stage.idx}: ${stage.name}</h3>`;
+  html += `<div class="detail-row"><span class="detail-key">Mode</span><span class="detail-val">${modeBadge(run.mode)}</span></div>`;
+  html += `<div class="detail-row"><span class="detail-key">Modules</span><span class="detail-val">${stage.modules}</span></div>`;
+  html += `<div class="detail-row"><span class="detail-key">Events</span><span class="detail-val">${stage.events.toLocaleString()}</span></div>`;
+  html += `<div class="detail-row"><span class="detail-key">Wall Time</span><span class="detail-val">${stage.wall_us.toFixed(1)} µs</span></div>`;
+  html += `<div class="detail-row"><span class="detail-key">Rel Start</span><span class="detail-val">${stage.rel_us} µs</span></div>`;
+
+  if (stage.threads.length > 0) {
+    html += `<div class="detail-row"><span class="detail-key">Threads</span><span class="detail-val">${stage.threads.length}</span></div>`;
+    html += '<div class="thread-list">';
+    stage.threads.forEach(t => {
+      const mods = t.modules.length > 6 ? t.modules.slice(0, 6).join(', ') + ` … (+${t.modules.length - 6})` : t.modules.join(', ');
+      html += `<div style="margin:4px 0"><span class="thread-chip">T${t.id}</span><small style="color:var(--text-muted)">${mods}</small></div>`;
+    });
+    html += '</div>';
+  }
+
+  // Show a few emits/delivers if present
+  if (stage.emits.length > 0) {
+    html += `<div style="margin-top:10px"><h3>Sample EMITs (${stage.emits.length} total)</h3>`;
+    stage.emits.slice(0, 5).forEach(ev => {
+      html += `<div style="font-size:0.78rem;color:var(--text-muted);margin:2px 0">NIC-${ev.src}→${ev.dst} pkt=${ev.pkt} @${ev.time_ns}ns</div>`;
+    });
+    html += '</div>';
+  }
+  if (stage.delivers.length > 0) {
+    html += `<div style="margin-top:8px"><h3>Sample DELIVERs (${stage.delivers.length} total)</h3>`;
+    stage.delivers.slice(0, 5).forEach(ev => {
+      html += `<div style="font-size:0.78rem;color:var(--text-muted);margin:2px 0">→NIC-${ev.dst} pkt=${ev.pkt} @${ev.time_ns}ns</div>`;
+    });
+    html += '</div>';
+  }
+
+  el.innerHTML = html;
+}
+
+// ============================================================
+// TAB 4: PACKET FLOW
+// ============================================================
+function renderPacketFlow(d) {
+  const panel = document.getElementById('tab-pf');
+  panel.style.display = 'block';
+  panel.classList.add('active');
+
+  // Find the first run with verbose data (prefer Serial)
+  let run = d.runs.find(r => r.stages.some(s => s.emits.length > 0));
+  if (!run) { document.getElementById('pf-tbody').innerHTML = '<tr><td colspan="6" style="color:var(--text-muted);text-align:center">No verbose packet data in this trace.</td></tr>'; return; }
+
+  // Stage 0 = NIC_MODULES (emit source); last stage = delivery stage
+  // (2-tier last stage is CORE_FWD, 3-tier is TOR_EGRESS — use last regardless of name)
+  const stage0 = run.stages.find(s => s.name === 'NIC_MODULES');
+  const stage6 = run.stages.length ? run.stages[run.stages.length - 1] : null;
+
+  const emits = stage0 ? stage0.emits : [];
+  const delivers = stage6 ? stage6.delivers : [];
+
+  // Build emit map: key = "src_dst_pkt" -> emit record
+  // Note: DELIVERED has src/dst swapped (src=dst_nic, dst=src_nic in some traces)
+  // Actually from the format: DELIVERED src=8 dst=0 means delivered to src 0 from 8
+  // The key for matching: EMIT src=0 dst=8 pkt=0 -> DELIVERED src=8 dst=0 pkt=0
+  const emitMap = {};
+  emits.forEach(e => {
+    const key = `${e.src}_${e.dst}_${e.pkt}`;
+    emitMap[key] = e;
+  });
+
+  const packets = [];
+  delivers.forEach(del => {
+    // DELIVERED src=8 dst=0 pkt=0 -> match EMIT src=0 dst=8 pkt=0
+    const key = `${del.dst}_${del.src}_${del.pkt}`;
+    const emit = emitMap[key];
+    if (emit) {
+      packets.push({
+        pkt: del.pkt,
+        src: emit.src,
+        dst: emit.dst,
+        emit_ns: emit.time_ns,
+        delivered_ns: del.time_ns,
+        latency_ns: del.time_ns - emit.time_ns,
+      });
+    }
+  });
+
+  // Sort by pkt id
+  packets.sort((a, b) => a.pkt - b.pkt || a.src - b.src);
+
+  // Populate src filter
+  const srcSet = [...new Set(packets.map(p => p.src))].sort((a, b) => a - b);
+  const sel = document.getElementById('pf-src-filter');
+  sel.innerHTML = '<option value="">All</option>';
+  srcSet.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = `NIC-${s}`;
+    sel.appendChild(opt);
+  });
+
+  function renderTable(srcFilter) {
+    const filtered = srcFilter === '' ? packets : packets.filter(p => p.src === parseInt(srcFilter));
+    const show = filtered.slice(0, 500);
+    document.getElementById('pf-count').textContent = `Showing ${show.length} of ${filtered.length} packets`;
+    const tbody = document.getElementById('pf-tbody');
+    tbody.innerHTML = show.map(p => `
+      <tr>
+        <td class="num">${p.pkt}</td>
+        <td>NIC-${p.src}</td>
+        <td>NIC-${p.dst}</td>
+        <td class="num">${p.emit_ns.toFixed(1)}</td>
+        <td class="num">${p.delivered_ns.toFixed(1)}</td>
+        <td class="num">${p.latency_ns.toFixed(1)}</td>
+      </tr>`).join('');
+  }
+
+  sel.onchange = () => renderTable(sel.value);
+  renderTable('');
+}
+
+// ============================================================
+// TAB 5: CORRECTNESS
+// ============================================================
+function renderCorrectness() {
+  const panel = document.getElementById('tab-corr');
+  panel.style.display = 'block';
+  panel.classList.add('active');
+
+  if (!simOutputLoaded || !simOutputScenarios.length) {
+    panel.innerHTML = '<div class="card"><p style="color:var(--text-muted);padding:20px">Load sim_output.txt to see correctness validation results.</p></div>';
+    return;
+  }
+
+  const match = getActiveCorrectnessScenario(allData[activeScenarioIdx]);
+  const simIdx = match.index;
+  const scenario = match.scenario;
+  if (!scenario) {
+    panel.innerHTML = '<div class="card"><p style="color:var(--text-muted);padding:20px">No correctness scenario matched the active trace.</p></div>';
+    return;
+  }
+
+  let html = '';
+
+  // Scenario selector tabs
+  html += '<div id="corr-scenario-tabs">';
+  simOutputScenarios.forEach((s, i) => {
+    const isActive = i === simIdx;
+    html += `<button class="corr-stab${isActive ? ' active' : ''}" data-simidx="${i}">${s.label}</button>`;
+  });
+  html += '</div>';
+
+  html += '<div class="card">';
+  html += '<div class="section-head"><div><h2>Correctness Scoreboard</h2><p>Start with the verdict matrix, then use the failure table and performance summary underneath as supporting evidence.</p></div></div>';
+  html += buildCorrectnessMatrixHTML(scenario);
+  html += `<div class="${scenario.overallPass ? 'overall-pass' : 'overall-fail'}">${scenario.overallPass ? '&#10003;' : '&#10007;'} OVERALL CORRECTNESS: ${scenario.overallPass ? 'PASS' : 'FAIL'}</div>`;
+  html += `<div class="metric-card" style="margin-top:16px"><h3>${scenario.overallPass ? 'Failure Drill-down' : 'Failure Details'}</h3>${buildFailureDetailsHTML(scenario)}</div>`;
+  html += '</div>';
+
+  html += '<div class="card">';
+  html += '<h2>Supporting Performance Table</h2>';
+  html += buildModeComparisonTableHTML(scenario.modes, getExpectedPacketCount(scenario.config));
+  html += '</div>';
+
+  panel.innerHTML = html;
+
+  // Attach scenario tab click handlers
+  panel.querySelectorAll('.corr-stab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeSimScenarioIdx = parseInt(btn.dataset.simidx);
+      // Also sync the main scenario tab if only sim_output is loaded
+      if (!allData.length) {
+        activeScenarioIdx = activeSimScenarioIdx;
+        document.querySelectorAll('.scenario-tab').forEach((el, j) => el.classList.toggle('active', j === activeSimScenarioIdx));
+      }
+      renderCorrectness();
+    });
+  });
+}
+
+// ============================================================
+// TAB 6: CONFIGURE & RUN
+// ============================================================
+const SERVER_URL = 'http://localhost:8080';
+
+function cfgTierValue() {
+  return parseInt(document.querySelector('input[name="tier"]:checked')?.value) || 2;
+}
+
+function cfgTopologyMode() {
+  return document.querySelector('input[name="topo-input-mode"]:checked')?.value || 'manual';
+}
+
+function cfgResolveTopologyConfig() {
+  const tier = cfgTierValue();
+  const mode = cfgTopologyMode();
+
+  if (mode === 'manual') {
+    const numSpine = parseInt(document.getElementById('cfg-spine').value) || 0;
+    const numLeaf = parseInt(document.getElementById('cfg-leaf').value) || 0;
+    const nicsPerLeaf = parseInt(document.getElementById('cfg-npl').value) || 0;
+    const numAgg = tier === 3 ? (parseInt(document.getElementById('cfg-agg').value) || 0) : 0;
+
+    if (numSpine < 1 || numLeaf < 1 || nicsPerLeaf < 1 || (tier === 3 && numAgg < 1)) {
+      return { ok: false, message: 'Manual topology counts must all be at least 1.' };
+    }
+
+    return {
+      ok: true,
+      mode,
+      num_tiers: tier,
+      num_spine: numSpine,
+      num_leaf: numLeaf,
+      nics_per_leaf: nicsPerLeaf,
+      num_agg: numAgg,
+      total_nics: numLeaf * nicsPerLeaf,
+      summary_note: tier === 3
+        ? `Manual 3-tier topology: Core ${numSpine}, Agg ${numAgg}, ToR ${numLeaf}, ${nicsPerLeaf} NICs per ToR.`
+        : `Manual 2-tier topology: Spine ${numSpine}, Leaf ${numLeaf}, ${nicsPerLeaf} NICs per leaf.`,
+      port_meta: {},
+    };
+  }
+
+  if (tier === 2) {
+    const spinePorts = parseInt(document.getElementById('cfg-auto-spine-ports').value) || 0;
+    const leafPorts = parseInt(document.getElementById('cfg-auto-leaf-ports').value) || 0;
+    const numSpine = Math.floor(leafPorts / 2);
+    const nicsPerLeaf = leafPorts - numSpine;
+    const numLeaf = spinePorts;
+
+    if (spinePorts < 1 || leafPorts < 2 || numSpine < 1 || nicsPerLeaf < 1) {
+      return { ok: false, message: 'For auto 2-tier mode, use at least 1 spine port and at least 2 leaf ports.' };
+    }
+
+    return {
+      ok: true,
+      mode,
+      num_tiers: tier,
+      num_spine: numSpine,
+      num_leaf: numLeaf,
+      nics_per_leaf: nicsPerLeaf,
+      num_agg: 0,
+      total_nics: numLeaf * nicsPerLeaf,
+      summary_note: `Auto 2-tier heuristic: each leaf uses ${numSpine} uplinks to the spines and keeps ${nicsPerLeaf} host-facing ports; spine port count creates ${numLeaf} leaves in a full mesh.`,
+      port_meta: {
+        topology_source: 'auto_ports',
+        spine_ports: spinePorts,
+        leaf_ports: leafPorts,
+      },
+    };
+  }
+
+  const corePorts = parseInt(document.getElementById('cfg-auto-core-ports').value) || 0;
+  const aggPorts = parseInt(document.getElementById('cfg-auto-agg-ports').value) || 0;
+  const torPorts = parseInt(document.getElementById('cfg-auto-tor-ports').value) || 0;
+  const numAgg = Math.min(corePorts, Math.floor(torPorts / 2));
+  const nicsPerLeaf = torPorts - numAgg;
+  const numLeaf = Math.floor(aggPorts / 2);
+  const numSpine = aggPorts - numLeaf;
+
+  if (corePorts < 1 || aggPorts < 2 || torPorts < 2 || numAgg < 1 || nicsPerLeaf < 1 || numLeaf < 1 || numSpine < 1) {
+    return { ok: false, message: 'For auto 3-tier mode, use at least 1 core port and at least 2 ports on both Agg and ToR switches.' };
+  }
+
+  const aggCapNote = numAgg < Math.floor(torPorts / 2)
+    ? ` Agg count is capped at ${numAgg} by the core-port budget.`
+    : '';
+
+  return {
+    ok: true,
+    mode,
+    num_tiers: tier,
+    num_spine: numSpine,
+    num_leaf: numLeaf,
+    nics_per_leaf: nicsPerLeaf,
+    num_agg: numAgg,
+    total_nics: numLeaf * nicsPerLeaf,
+    summary_note: `Auto 3-tier heuristic: each ToR uses ${numAgg} uplinks to Agg and keeps ${nicsPerLeaf} host-facing ports; each Agg splits ${aggPorts} ports into ${numLeaf} ToR-facing and ${numSpine} Core-facing links.${aggCapNote}`,
+    port_meta: {
+      topology_source: 'auto_ports',
+      core_ports: corePorts,
+      agg_ports: aggPorts,
+      tor_ports: torPorts,
+    },
+  };
+}
+
+function cfgRefreshTopologyUI() {
+  const tier = cfgTierValue();
+  const mode = cfgTopologyMode();
+  const is3 = tier === 3;
+
+  document.getElementById('cfg-manual-topo').style.display = mode === 'manual' ? 'block' : 'none';
+  document.getElementById('cfg-auto-topo').style.display = mode === 'ports' ? 'block' : 'none';
+  document.getElementById('cfg-auto-2tier').style.display = mode === 'ports' && !is3 ? 'grid' : 'none';
+  document.getElementById('cfg-auto-3tier').style.display = mode === 'ports' && is3 ? 'grid' : 'none';
+  document.getElementById('cfg-agg-row').style.display = mode === 'manual' && is3 ? 'block' : 'none';
+
+  document.getElementById('lbl-spine').textContent = is3 ? 'Core switches' : 'Spine switches';
+  document.getElementById('lbl-leaf').textContent = is3 ? 'ToR switches' : 'Leaf switches';
+  document.getElementById('lbl-npl').textContent = is3 ? 'NICs / ToR' : 'NICs / leaf';
+
+  document.getElementById('cfg-auto-topo-note').textContent = is3
+    ? 'Auto mode uses a balanced heuristic for the simulator’s simplified 3-tier full-mesh model: ToR ports split between hosts and Agg uplinks, and Agg ports split evenly between ToR downlinks and Core uplinks.'
+    : 'Auto mode uses a balanced heuristic for 2-tier full-mesh leaf-spine: each leaf splits its ports between hosts and spine uplinks, and each spine port connects to one leaf.';
+
+  cfgTopoSummary();
+}
+
+function cfgTopoSummary() {
+  const resolved = cfgResolveTopologyConfig();
+  const tier = parseInt(document.querySelector('input[name="tier"]:checked')?.value) || 2;
+  const pkts = parseInt(document.getElementById('cfg-pkts').value) || 0;
+  const summaryEl = document.getElementById('cfg-topo-summary');
+
+  if (!resolved.ok) {
+    summaryEl.innerHTML = `<span style="color:#e74c3c">${resolved.message}</span>`;
+    return;
+  }
+
+  const total = resolved.total_nics;
+  const layerSummary = tier === 3
+    ? `Core: ${resolved.num_spine}  |  Agg: ${resolved.num_agg}  |  ToR: ${resolved.num_leaf}`
+    : `Spine: ${resolved.num_spine}  |  Leaf: ${resolved.num_leaf}`;
+  const nicLabel = tier === 3 ? 'NICs / ToR' : 'NICs / leaf';
+  const sourceLabel = resolved.mode === 'ports' ? 'Auto from port counts' : 'Manual counts';
+
+  summaryEl.innerHTML =
+    `<strong>${sourceLabel}</strong>  |  ${tier}-Tier  |  ${layerSummary}  |  ${nicLabel}: ${resolved.nics_per_leaf}  |  Total NICs: ${total.toLocaleString()}  |  Total packets: ${(total * pkts).toLocaleString()}`
+    + `<br><small style="color:var(--text-muted)">${resolved.summary_note}</small>`;
+}
+
+function cfgThreadNote() {
+  const checked = [...document.querySelectorAll('#cfg-threads-wrap input:checked')].map(i => i.value);
+  const display = checked.map(v => v === '-1' ? 'HW(auto)' : v + 'T').join(', ');
+  document.getElementById('cfg-thread-note').textContent =
+    checked.length ? `Will run exactly: Serial + Parallel(${display})` : 'Will run exactly: Serial only';
+}
+
+// Wire up live-update listeners
+['cfg-spine','cfg-leaf','cfg-npl','cfg-pkts','cfg-agg','cfg-auto-spine-ports','cfg-auto-leaf-ports','cfg-auto-core-ports','cfg-auto-agg-ports','cfg-auto-tor-ports'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', cfgTopoSummary);
+});
+document.getElementById('cfg-threads-wrap')?.addEventListener('change', cfgThreadNote);
+// Tier change / topology-input change: refresh visible controls + summary
+document.querySelectorAll('input[name="tier"]').forEach(radio => {
+  radio.addEventListener('change', cfgRefreshTopologyUI);
+});
+document.querySelectorAll('input[name="topo-input-mode"]').forEach(radio => {
+  radio.addEventListener('change', cfgRefreshTopologyUI);
+});
+
+async function checkServer() {
+  const banner = document.getElementById('cfg-server-banner');
+  if (!banner) return;
+  try {
+    const r = await fetch(SERVER_URL + '/health', { signal: AbortSignal.timeout(1500) });
+    if (r.ok) {
+      banner.className = 'card server-ok';
+      banner.innerHTML = '&#10003; Server connected at <strong>' + SERVER_URL + '</strong> &nbsp;—&nbsp; ready to run simulations.';
+      return true;
+    }
+  } catch {}
+  banner.className = 'card server-err';
+  banner.innerHTML =
+    '&#10007; Server not running. Start it first:<br>' +
+    '<code style="font-size:0.88rem;background:rgba(0,0,0,0.3);padding:3px 8px;border-radius:4px;display:inline-block;margin-top:6px">' +
+    'cd ' + 'NSX_LeafSpine_V4  &amp;&amp;  python3 server.py' +
+    '</code><br><small style="color:var(--text-muted);margin-top:6px;display:block">Then open <strong>http://localhost:8080</strong> in your browser.</small>';
+  return false;
+}
+
+async function runSimulation() {
+  const btn = document.getElementById('cfg-run-btn');
+  const status = document.getElementById('cfg-run-status');
+  const logCard = document.getElementById('cfg-log-card');
+  const log = document.getElementById('cfg-log');
+
+  const topo = cfgResolveTopologyConfig();
+  if (!topo.ok) {
+    status.textContent = 'Topology error: ' + topo.message;
+    return;
+  }
+
+  const ok = await checkServer();
+  if (!ok) return;
+
+  // Build config object
+  const parallelThreads = [...document.querySelectorAll('#cfg-threads-wrap input:checked')]
+    .map(i => parseInt(i.value))
+    .filter(v => !isNaN(v));
+
+  const config = {
+    scenario_name:    document.getElementById('cfg-name').value.trim() || 'Custom',
+    num_tiers:        topo.num_tiers,
+    num_spine:        topo.num_spine,
+    num_leaf:         topo.num_leaf,
+    nics_per_leaf:    topo.nics_per_leaf,
+    num_packets:      parseInt(document.getElementById('cfg-pkts').value),
+    nic_interval_ns:  parseFloat(document.getElementById('cfg-interval').value),
+    link_delay_ns:    parseFloat(document.getElementById('cfg-delay').value),
+    verbose_trace:    document.getElementById('cfg-verbose').checked,
+    parallel_threads: parallelThreads,
+    ...topo.port_meta,
+  };
+  if (topo.num_tiers === 3) {
+    config.num_agg = topo.num_agg;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Running…';
+  status.textContent = 'Sending config to simulator…';
+  logCard.style.display = 'block';
+  log.textContent = '';
+
+  try {
+    const resp = await fetch(SERVER_URL + '/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: 'Unknown error' }));
+      throw new Error(err.error || resp.statusText);
+    }
+
+    const data = await resp.json();
+    log.textContent = data.stdout || '(no output)';
+    if (data.stderr) log.textContent += '\n--- stderr ---\n' + data.stderr;
+
+    if (data.returncode !== 0) {
+      status.textContent = `Simulator exited with code ${data.returncode}.`;
+      btn.disabled = false;
+      btn.textContent = '▶ Run Simulation';
+      return;
+    }
+
+    status.textContent = 'Done! Loading results…';
+
+    // Inject returned files into the app
+    allData = [];
+    simOutputScenarios = [];
+    simOutputLoaded = false;
+    activeScenarioIdx = 0;       // reset — new run produces 1 trace, old index may be out of bounds
+    activeSimScenarioIdx = 0;
+    navRunIdx = 0;
+    navStageIdx = 0;
+    let traceLoaded = false;
+    const returnedFiles = Object.entries(data.files || {});
+    const hasCustomTrace = returnedFiles.some(([fname, content]) =>
+      fname === 'sim_trace_custom.txt' && content.includes('SCENARIO'));
+
+    for (const [fname, content] of returnedFiles) {
+      if (/^\s*╔/m.test(content)) {
+        simOutputScenarios = parseSimOutput(content);
+        simOutputLoaded = true;
+      } else if (content.includes('SCENARIO')) {
+        // A Configure & Run request should focus on the newly generated custom trace.
+        if (hasCustomTrace && fname !== 'sim_trace_custom.txt') continue;
+        const parsed = parseTrace(content);
+        parsed._filename = fname;
+        allData.push(parsed);
+        traceLoaded = true;
+      }
+    }
+
+    allData.sort((a, b) => a._filename.localeCompare(b._filename));
+    const customIdx = allData.findIndex(d => d._filename === 'sim_trace_custom.txt');
+    if (customIdx >= 0) activeScenarioIdx = customIdx;
+
+    const total = allData.length + (simOutputLoaded ? 1 : 0);
+    document.getElementById('load-status').textContent =
+      `${total} file(s) loaded from last run`;
+    status.textContent = `Results loaded. ${traceLoaded ? 'Switching to Overview tab.' : ''}`;
+
+    renderAll();
+    if (allData.length) switchTab('overview');
+    else if (simOutputLoaded) switchTab('corr');
+
+  } catch (e) {
+    status.textContent = 'Error: ' + e.message;
+    log.textContent = (log.textContent || '') + '\n[Error] ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '▶ Run Simulation';
+  }
+}
+
+function renderConfigure() {
+  const panel = document.getElementById('tab-cfg');
+  panel.style.display = 'block';
+  panel.classList.add('active');
+  cfgRefreshTopologyUI();
+  cfgThreadNote();
+  checkServer();
+}
+
+// ============================================================
+// INIT: Show empty state until files loaded
+// ============================================================
+(function init() {
+  document.querySelectorAll('.tab-panel').forEach(p => { p.style.display = 'none'; });
+  cfgRefreshTopologyUI();
+  cfgThreadNote();
+  // Show Configure & Run tab by default on fresh load
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-cfg-btn').classList.add('active');
+  activeTab = 'cfg';
+  document.getElementById('tab-cfg').style.display = 'block';
+  document.getElementById('tab-cfg').classList.add('active');
+  checkServer();
+})();
+</script>
+</body>
+</html>

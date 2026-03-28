@@ -18,9 +18,13 @@ struct TopoConfig {
     double nic_interval = 10.0; // ns between packets
     double link_delay   = 5.0;  // ns per link
 
+    int num_tiers  = 2;   // 2 or 3
+    int num_agg    = 4;   // Aggregation switches (3-tier only, ignored in 2-tier)
+
     // Derived
     int total_nics() const { return num_leaf * nics_per_leaf; }
     int nic_to_leaf(int nic_id) const { return nic_id / nics_per_leaf; }
+    int num_link_hops() const { return num_tiers == 3 ? 3 : 2; }
 };
 
 // ─────────────────────────────────────────────
@@ -42,6 +46,12 @@ struct Topology {
     std::vector<std::unique_ptr<LinkModule>>             spine_uplink_mods;// leaf→spine
     std::vector<std::unique_ptr<SwitchForwardingModule>> spine_fwd_mods;
     std::vector<std::unique_ptr<EgressModule>>           spine_egress_mods;
+    // 3-tier extra module ownership (unused in 2-tier)
+    std::vector<std::unique_ptr<LinkModule>>             t3_agg_core_links;
+    std::vector<std::unique_ptr<SwitchForwardingModule>> t3_core_fwd_mods;
+    std::vector<std::unique_ptr<EgressModule>>           t3_core_egress_mods;
+    std::vector<std::unique_ptr<SwitchForwardingModule>> t3_agg_fwd_down_mods;
+    std::vector<std::unique_ptr<EgressModule>>           t3_agg_tor_egress_mods;
     // Sink queues (destination NIC queues — count delivered packets)
     std::vector<std::unique_ptr<FlexQueue>>              sink_queues;
 
@@ -59,7 +69,7 @@ struct Topology {
 // For simplicity, all traffic is sent from NIC[i] to
 // NIC[(i + total_nics/2) % total_nics] (opposite half).
 // ─────────────────────────────────────────────
-inline Topology build_topology(const TopoConfig& cfg) {
+inline Topology build_topology_2tier(const TopoConfig& cfg) {
     Topology topo;
     topo.cfg = cfg;
 
@@ -216,7 +226,8 @@ inline Topology build_topology(const TopoConfig& cfg) {
             // We re-use a simple link with 0 delay as a demux placeholder
             topo.leaf_egress_mods.push_back(std::make_unique<EgressModule>(
                 "LeafEgr-L" + std::to_string(l) + "-S" + std::to_string(s),
-                leaf_down_q[l][s], topo.sink_queues[l * NPL].get())); // simplified: deliver to first NIC in leaf
+                leaf_down_q[l][s], topo.sink_queues[l * NPL].get(),
+                true)); // is_sink=true → tracer logs DELIVERED
         }
     }
 
@@ -240,4 +251,213 @@ inline Topology build_topology(const TopoConfig& cfg) {
     };
 
     return topo;
+}
+
+inline Topology build_topology_3tier(const TopoConfig& cfg) {
+    Topology topo;
+    topo.cfg = cfg;
+
+    const int N   = cfg.total_nics();
+    const int NL  = cfg.num_leaf;      // num ToR switches
+    const int NA  = cfg.num_agg;       // num Aggregation switches
+    const int NC  = cfg.num_spine;     // num Core switches
+    const int NPL = cfg.nics_per_leaf; // NICs per ToR
+
+    auto make_q = [&](int fan_in) -> FlexQueue* {
+        topo.queues.push_back(std::make_unique<FlexQueue>(fan_in));
+        return topo.queues.back().get();
+    };
+
+    // Sink queues — one per NIC, fan_in = NA (one per Agg that can deliver)
+    topo.sink_queues.resize(N);
+    for (int i = 0; i < N; ++i)
+        topo.sink_queues[i] = std::make_unique<FlexQueue>(NA);
+
+    // NIC output queues (fan_in=1)
+    std::vector<FlexQueue*> nic_to_tor_q(N);
+    for (int i = 0; i < N; ++i) nic_to_tor_q[i] = make_q(1);
+
+    // ToR ingress queues after NIC→ToR link (fan_in=1)
+    std::vector<FlexQueue*> tor_ingress_q(N);
+    for (int i = 0; i < N; ++i) tor_ingress_q[i] = make_q(1);
+
+    // ToR → Agg queues: tor_to_agg_q[tor][agg], fan_in = NPL
+    std::vector<std::vector<FlexQueue*>> tor_to_agg_q(NL, std::vector<FlexQueue*>(NA));
+    for (int t = 0; t < NL; ++t)
+        for (int a = 0; a < NA; ++a)
+            tor_to_agg_q[t][a] = make_q(NPL);
+
+    // Agg ingress after ToR→Agg link: agg_ingress_q[agg][tor], fan_in=1
+    std::vector<std::vector<FlexQueue*>> agg_ingress_q(NA, std::vector<FlexQueue*>(NL));
+    for (int a = 0; a < NA; ++a)
+        for (int t = 0; t < NL; ++t)
+            agg_ingress_q[a][t] = make_q(1);
+
+    // Agg → Core queues: agg_to_core_q[agg][core], fan_in = NL
+    std::vector<std::vector<FlexQueue*>> agg_to_core_q(NA, std::vector<FlexQueue*>(NC));
+    for (int a = 0; a < NA; ++a)
+        for (int c = 0; c < NC; ++c)
+            agg_to_core_q[a][c] = make_q(NL);
+
+    // Core ingress after Agg→Core link: core_ingress_q[core][agg], fan_in=1
+    std::vector<std::vector<FlexQueue*>> core_ingress_q(NC, std::vector<FlexQueue*>(NA));
+    for (int c = 0; c < NC; ++c)
+        for (int a = 0; a < NA; ++a)
+            core_ingress_q[c][a] = make_q(1);
+
+    // Core → Agg downward queues: core_to_agg_q[core][agg], fan_in = NA
+    std::vector<std::vector<FlexQueue*>> core_to_agg_q(NC, std::vector<FlexQueue*>(NA));
+    for (int c = 0; c < NC; ++c)
+        for (int a = 0; a < NA; ++a)
+            core_to_agg_q[c][a] = make_q(NA);
+
+    // Agg downward ingress after Core egress: agg_down_in_q[agg][core], fan_in=1
+    std::vector<std::vector<FlexQueue*>> agg_down_in_q(NA, std::vector<FlexQueue*>(NC));
+    for (int a = 0; a < NA; ++a)
+        for (int c = 0; c < NC; ++c)
+            agg_down_in_q[a][c] = make_q(1);
+
+    // Agg → ToR downward queues: agg_to_tor_q[agg][tor], fan_in = NC
+    std::vector<std::vector<FlexQueue*>> agg_to_tor_q(NA, std::vector<FlexQueue*>(NL));
+    for (int a = 0; a < NA; ++a)
+        for (int t = 0; t < NL; ++t)
+            agg_to_tor_q[a][t] = make_q(NC);
+
+    // ToR downward ingress after Agg egress: tor_down_q[tor][agg], fan_in=1
+    std::vector<std::vector<FlexQueue*>> tor_down_q(NL, std::vector<FlexQueue*>(NA));
+    for (int t = 0; t < NL; ++t)
+        for (int a = 0; a < NA; ++a)
+            tor_down_q[t][a] = make_q(1);
+
+    // === Stage 0: NIC modules ===
+    for (int i = 0; i < N; ++i) {
+        int dst = (i + N / 2) % N;
+        topo.nic_mods.push_back(std::make_unique<NICModule>(
+            i, cfg.num_packets, cfg.nic_interval, dst, nic_to_tor_q[i]));
+    }
+
+    // === Stage 1: NIC→ToR link modules ===
+    for (int i = 0; i < N; ++i) {
+        topo.nic_uplink_mods.push_back(std::make_unique<LinkModule>(
+            "UplinkNIC-" + std::to_string(i),
+            cfg.link_delay, nic_to_tor_q[i], tor_ingress_q[i]));
+    }
+
+    // === Stage 2: ToR forwarding (upward → Agg) ===
+    for (int t = 0; t < NL; ++t) {
+        std::vector<FlexQueue*> ins;
+        for (int p = 0; p < NPL; ++p) ins.push_back(tor_ingress_q[t * NPL + p]);
+
+        auto route_fn = [cfg_copy = cfg, t, ttaq = tor_to_agg_q, NA](int dst_nic) mutable -> FlexQueue* {
+            int dst_tor = cfg_copy.nic_to_leaf(dst_nic);
+            if (dst_tor == t) return nullptr;
+            return ttaq[t][dst_tor % NA];
+        };
+        topo.leaf_fwd_mods.push_back(std::make_unique<SwitchForwardingModule>(
+            "ToRFwd-" + std::to_string(t), ins, route_fn));
+        for (int a = 0; a < NA; ++a)
+            topo.leaf_fwd_mods.back()->add_downstream(tor_to_agg_q[t][a]);
+    }
+
+    // === Stage 3: ToR→Agg link modules ===
+    for (int t = 0; t < NL; ++t)
+        for (int a = 0; a < NA; ++a)
+            topo.spine_uplink_mods.push_back(std::make_unique<LinkModule>(
+                "ToR-Agg-T" + std::to_string(t) + "-A" + std::to_string(a),
+                cfg.link_delay, tor_to_agg_q[t][a], agg_ingress_q[a][t]));
+
+    // === Stage 4: Agg forwarding (upward → Core) ===
+    for (int a = 0; a < NA; ++a) {
+        std::vector<FlexQueue*> ins(agg_ingress_q[a].begin(), agg_ingress_q[a].end());
+        auto route_fn = [cfg_copy = cfg, atcq = agg_to_core_q, a, NC](int dst_nic) mutable -> FlexQueue* {
+            int dst_tor = cfg_copy.nic_to_leaf(dst_nic);
+            return atcq[a][dst_tor % NC];
+        };
+        topo.spine_fwd_mods.push_back(std::make_unique<SwitchForwardingModule>(
+            "AggFwdUp-" + std::to_string(a), ins, route_fn));
+        for (int c = 0; c < NC; ++c)
+            topo.spine_fwd_mods.back()->add_downstream(agg_to_core_q[a][c]);
+    }
+
+    // === Stage 5: Agg→Core link modules ===
+    for (int a = 0; a < NA; ++a)
+        for (int c = 0; c < NC; ++c)
+            topo.t3_agg_core_links.push_back(std::make_unique<LinkModule>(
+                "Agg-Core-A" + std::to_string(a) + "-C" + std::to_string(c),
+                cfg.link_delay, agg_to_core_q[a][c], core_ingress_q[c][a]));
+
+    // === Stage 6: Core forwarding (downward → Agg) ===
+    for (int c = 0; c < NC; ++c) {
+        std::vector<FlexQueue*> ins(core_ingress_q[c].begin(), core_ingress_q[c].end());
+        auto route_fn = [cfg_copy = cfg, ctaq = core_to_agg_q, c, NA](int dst_nic) mutable -> FlexQueue* {
+            int dst_tor = cfg_copy.nic_to_leaf(dst_nic);
+            return ctaq[c][dst_tor % NA];
+        };
+        topo.t3_core_fwd_mods.push_back(std::make_unique<SwitchForwardingModule>(
+            "CoreFwd-" + std::to_string(c), ins, route_fn));
+        for (int a = 0; a < NA; ++a)
+            topo.t3_core_fwd_mods.back()->add_downstream(core_to_agg_q[c][a]);
+    }
+
+    // === Stage 7: Core→Agg egress modules ===
+    for (int c = 0; c < NC; ++c)
+        for (int a = 0; a < NA; ++a)
+            topo.t3_core_egress_mods.push_back(std::make_unique<EgressModule>(
+                "CoreEgr-C" + std::to_string(c) + "-A" + std::to_string(a),
+                core_to_agg_q[c][a], agg_down_in_q[a][c]));
+
+    // === Stage 8: Agg forwarding (downward → ToR) ===
+    for (int a = 0; a < NA; ++a) {
+        std::vector<FlexQueue*> ins(agg_down_in_q[a].begin(), agg_down_in_q[a].end());
+        auto route_fn = [cfg_copy = cfg, atq = agg_to_tor_q, a](int dst_nic) mutable -> FlexQueue* {
+            int dst_tor = cfg_copy.nic_to_leaf(dst_nic);
+            return atq[a][dst_tor];
+        };
+        topo.t3_agg_fwd_down_mods.push_back(std::make_unique<SwitchForwardingModule>(
+            "AggFwdDn-" + std::to_string(a), ins, route_fn));
+        for (int t = 0; t < NL; ++t)
+            topo.t3_agg_fwd_down_mods.back()->add_downstream(agg_to_tor_q[a][t]);
+    }
+
+    // === Stage 9: Agg→ToR egress modules ===
+    for (int a = 0; a < NA; ++a)
+        for (int t = 0; t < NL; ++t)
+            topo.t3_agg_tor_egress_mods.push_back(std::make_unique<EgressModule>(
+                "AggTorEgr-A" + std::to_string(a) + "-T" + std::to_string(t),
+                agg_to_tor_q[a][t], tor_down_q[t][a]));
+
+    // === Stage 10: ToR→NIC delivery (sink) ===
+    for (int t = 0; t < NL; ++t)
+        for (int a = 0; a < NA; ++a)
+            topo.leaf_egress_mods.push_back(std::make_unique<EgressModule>(
+                "TorEgr-T" + std::to_string(t) + "-A" + std::to_string(a),
+                tor_down_q[t][a], topo.sink_queues[t * NPL].get(),
+                true)); // is_sink → DELIVERED
+
+    // === Build ordered stages ===
+    auto as_ptrs = [](auto& v) {
+        std::vector<Module*> r;
+        for (auto& p : v) r.push_back(p.get());
+        return r;
+    };
+
+    topo.stages = {
+        as_ptrs(topo.nic_mods),            // 0: NIC_MODULES
+        as_ptrs(topo.nic_uplink_mods),     // 1: NIC_UPLINKS
+        as_ptrs(topo.leaf_fwd_mods),       // 2: TOR_FWD
+        as_ptrs(topo.spine_uplink_mods),   // 3: TOR_TO_AGG
+        as_ptrs(topo.spine_fwd_mods),      // 4: AGG_FWD_UP
+        as_ptrs(topo.t3_agg_core_links),   // 5: AGG_TO_CORE
+        as_ptrs(topo.t3_core_fwd_mods),    // 6: CORE_FWD
+        as_ptrs(topo.t3_core_egress_mods), // 7: CORE_EGRESS
+        as_ptrs(topo.t3_agg_fwd_down_mods),// 8: AGG_FWD_DOWN
+        as_ptrs(topo.t3_agg_tor_egress_mods),// 9: AGG_TO_TOR
+        as_ptrs(topo.leaf_egress_mods),    // 10: TOR_EGRESS
+    };
+
+    return topo;
+}
+
+inline Topology build_topology(const TopoConfig& cfg) {
+    return cfg.num_tiers == 3 ? build_topology_3tier(cfg) : build_topology_2tier(cfg);
 }

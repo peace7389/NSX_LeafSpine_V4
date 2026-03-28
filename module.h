@@ -1,6 +1,7 @@
 #pragma once
 #include "event.h"
 #include "queues.h"
+#include "trace.h"
 #include <vector>
 #include <string>
 #include <functional>
@@ -21,6 +22,7 @@ public:
     virtual ~Module() = default;
 
     virtual void process(double until_time) = 0;
+    virtual void reset() { cur_time_ = 0.0; }
 
     // Downstream modules this module forwards events to
     void add_downstream(FlexQueue* q) { out_queues_.push_back(q); }
@@ -28,6 +30,8 @@ public:
 
     const std::string& name() const { return name_; }
     double cur_time()         const { return cur_time_; }
+
+    void set_tracer(Tracer* t) { tracer_ = t; }
 
     // MET of this module = min MET over all its input queues
     double compute_met() const {
@@ -39,6 +43,7 @@ public:
 protected:
     std::string              name_;
     double                   cur_time_;
+    Tracer*                  tracer_ = nullptr;
     std::vector<FlexQueue*>  in_queues_;   // owned by topology builder
     std::vector<FlexQueue*>  out_queues_;  // downstream queues (not owned)
 
@@ -69,6 +74,7 @@ public:
             if (ts > until_time) break;
             Event e{ ts, id_, dst_nic_, next_seq_, 0 };
             uplink_q_->push(e);
+            if (tracer_) tracer_->pkt_emit(name_, e);
             cur_time_ = ts;
             ++next_seq_;
         }
@@ -77,6 +83,11 @@ public:
                          ? next_seq_ * interval_
                          : std::numeric_limits<double>::infinity();
         uplink_q_->set_met(next_ts);
+    }
+
+    void reset() override {
+        Module::reset();
+        next_seq_ = 0;
     }
 
 private:
@@ -108,11 +119,16 @@ public:
             fwd.timestamp += delay_;
             fwd.hop++;
             out_q_->push(fwd);
+            if (tracer_) tracer_->pkt_fwd(name_, *ev, fwd.timestamp);
             cur_time_ = ev->timestamp;
             ev = in_q_->pop();
         }
         // Promise: earliest future event + delay
         out_q_->set_met(met + delay_);
+    }
+
+    void reset() override {
+        Module::reset();
     }
 
 private:
@@ -161,6 +177,7 @@ public:
                 Event fwd = *ev;
                 fwd.hop++;
                 out->push(fwd);
+                if (tracer_) tracer_->pkt_route(name_, fwd);
             }
             cur_time_ = ev->timestamp;
             ev = flex_q_.pop();
@@ -169,6 +186,12 @@ public:
 
         // Propagate MET to all output queues
         for (auto* q : out_queues_) q->set_met(met);
+    }
+
+    void reset() override {
+        Module::reset();
+        flex_q_.clear();
+        flex_q_.set_met(std::numeric_limits<double>::infinity());
     }
 
 private:
@@ -183,8 +206,9 @@ private:
 // ─────────────────────────────────────────────
 class EgressModule : public Module {
 public:
-    EgressModule(std::string name, FlexQueue* in_q, FlexQueue* out_q)
-        : Module(std::move(name)), in_q_(in_q), out_q_(out_q)
+    EgressModule(std::string name, FlexQueue* in_q, FlexQueue* out_q,
+                 bool is_sink = false)
+        : Module(std::move(name)), in_q_(in_q), out_q_(out_q), is_sink_(is_sink)
     {
         add_in_queue(in_q_);
     }
@@ -194,13 +218,22 @@ public:
         auto ev = in_q_->pop();
         while (ev && ev->timestamp <= until_time) {
             out_q_->push(*ev);
+            if (tracer_) {
+                if (is_sink_) tracer_->pkt_delivered(name_, *ev);
+                else          tracer_->pkt_egress(name_, *ev);
+            }
             cur_time_ = ev->timestamp;
             ev = in_q_->pop();
         }
         out_q_->set_met(met);
     }
 
+    void reset() override {
+        Module::reset();
+    }
+
 private:
     FlexQueue* in_q_;
     FlexQueue* out_q_;
+    bool       is_sink_;
 };

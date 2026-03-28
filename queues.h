@@ -41,6 +41,11 @@ public:
         return q_.size();
     }
 
+    void clear() {
+        std::lock_guard<std::mutex> lg(mu_);
+        while (!q_.empty()) q_.pop();
+    }
+
 private:
     mutable std::mutex    mu_;
     std::queue<Event>     q_;
@@ -82,6 +87,11 @@ public:
         return pq_.size();
     }
 
+    void clear() {
+        std::lock_guard<std::mutex> lg(mu_);
+        while (!pq_.empty()) pq_.pop();
+    }
+
 private:
     mutable std::mutex mu_;
     MinHeap            pq_;
@@ -108,7 +118,10 @@ public:
 
     explicit FlexQueue(int fan_in)
         : fan_in_(fan_in),
-          use_priority_(fan_in > FLEX_FAN_IN_THRESHOLD),
+          // fan_in == 4 already needs timestamp ordering in this simulator:
+          // a plain FIFO can block later-ready packets behind one over-deadline
+          // packet from another input, which breaks per-tick stage draining.
+          use_priority_(fan_in >= FLEX_FAN_IN_THRESHOLD),
           met_(double_to_bits(std::numeric_limits<double>::infinity()))
     {}
 
@@ -130,6 +143,11 @@ public:
     bool empty() const {
         if (use_priority_) return pq_.empty();
         return fifo_.empty();
+    }
+
+    void clear() {
+        if (use_priority_) pq_.clear();
+        else               fifo_.clear();
     }
 
     double get_met() const {
